@@ -4,3 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [lib]
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+sense-types = { workspace = true }
+serde_json = { workspace = true }
