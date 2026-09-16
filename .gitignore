@@ -1,0 +1,6 @@
+/target
+/data
+**/*.db
+.DS_Store
+.worktrees/
+.superpowers/
