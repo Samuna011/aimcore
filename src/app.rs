@@ -5,7 +5,12 @@ use bevy::{
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
-    config::ExperimentSettings,
+    camera_ctrl::{
+        apply_yaw_transform, drain_mouse_to_camera, InputProcessorState, LiveInputStats,
+    },
+    config::{ExperimentSettings, TelemetryBuffers, ValidationState},
+    frame_telemetry::{record_frame_telemetry, LiveFrameStats},
+    input_plugin::RawInputPlugin,
     scene::{maintain_horizontal_fov, setup_scene},
     validation_lab::draw_hud,
 };
@@ -13,6 +18,11 @@ use crate::{
 pub fn run() {
     App::new()
         .insert_resource(ExperimentSettings::default())
+        .init_resource::<ValidationState>()
+        .init_resource::<TelemetryBuffers>()
+        .init_resource::<InputProcessorState>()
+        .init_resource::<LiveInputStats>()
+        .init_resource::<LiveFrameStats>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
@@ -22,7 +32,17 @@ pub fn run() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(RawInputPlugin)
         .add_systems(Startup, setup_scene)
+        .add_systems(
+            Update,
+            (
+                drain_mouse_to_camera,
+                apply_yaw_transform,
+                record_frame_telemetry,
+            )
+                .chain(),
+        )
         .add_systems(Update, (maintain_horizontal_fov, capture_cursor))
         .add_systems(EguiPrimaryContextPass, draw_hud)
         .run();

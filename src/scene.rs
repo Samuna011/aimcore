@@ -5,7 +5,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 
-use crate::{config::ExperimentSettings, fov::vertical_fov_radians};
+use crate::{camera_ctrl::YawPitch, config::ExperimentSettings, fov::vertical_fov_radians};
 
 const INITIAL_ASPECT_RATIO: f64 = 16.0 / 9.0;
 
@@ -19,6 +19,7 @@ pub fn setup_scene(
 
     commands.spawn((
         Camera3d::default(),
+        YawPitch::default(),
         Projection::Perspective(PerspectiveProjection {
             fov: vertical_fov_radians(settings.fov_degrees_h, INITIAL_ASPECT_RATIO),
             ..default()

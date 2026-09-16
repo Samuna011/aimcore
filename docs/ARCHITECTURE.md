@@ -117,6 +117,22 @@ Mouse input is captured via Windows `WM_INPUT` raw relative movement.
 
 ---
 
+## Bevy 0.19 HWND Hook
+
+After winit creates the primary window, a Bevy `Startup` exclusive system reads
+the Win32 `HWND` from the window entity's `RawHandleWrapper`. It registers that
+handle with `sense_input_win::register_raw_mouse`, then installs a
+`SetWindowSubclass` callback on the same window thread.
+
+The subclass handles each `WM_INPUT` by calling
+`sense_input_win::handle_wm_input` with the shared `MouseQueue`, then always
+forwards the message to `DefSubclassProc` so winit's normal processing remains
+intact. Hook state is owned by the subclass reference data and released on
+`WM_NCDESTROY`. The Bevy `Update` drain consumes every queued sample in order;
+no Bevy cursor or `MouseMotion` event participates in the experimental stream.
+
+---
+
 ## Queue vs Render FPS
 
 Input collection and rendering run on independent cadences:

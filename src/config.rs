@@ -1,4 +1,5 @@
 use bevy::prelude::Resource;
+use sense_telemetry::SessionBuffers;
 use sense_types::{FovAxis, SensitivityConfig};
 
 #[derive(Resource, Debug, Clone)]
@@ -7,6 +8,29 @@ pub struct ExperimentSettings {
     pub sensitivity: f64,
     pub fov_degrees_h: f64,
 }
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationState {
+    Idle,
+    Running,
+}
+
+impl Default for ValidationState {
+    fn default() -> Self {
+        // Task 8 replaces this provisional always-active session with explicit
+        // Start Validation / End Validation lifecycle controls.
+        Self::Running
+    }
+}
+
+impl ValidationState {
+    pub fn is_running(self) -> bool {
+        matches!(self, Self::Running)
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct TelemetryBuffers(pub SessionBuffers);
 
 impl Default for ExperimentSettings {
     fn default() -> Self {
