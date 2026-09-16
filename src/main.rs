@@ -1,3 +1,9 @@
+mod app;
+mod config;
+mod fov;
+mod scene;
+mod validation_lab;
+
 fn main() {
-    println!("sense-maxer scaffold");
+    app::run();
 }

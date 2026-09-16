@@ -27,7 +27,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bevy = "=0.19.1"
+bevy_egui = "=0.42.0"
 sense-math = { workspace = true }
 sense-types = { workspace = true }
 sense-input-win = { workspace = true }
 sense-telemetry = { workspace = true }
+
+# Keep gpu-allocator's broad Windows API range on the version used by wgpu 29.
+[target.'cfg(windows)'.dependencies]
+windows = "=0.62.2"

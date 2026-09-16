@@ -88,6 +88,21 @@ Sensitivity formulas live only in `sense-math`. Bevy, UI, and database code neve
 
 ---
 
+## Horizontal FOV Projection
+
+The experiment configuration stores horizontal FOV, while Bevy's
+`PerspectiveProjection::fov` expects vertical radians. The app recomputes the
+vertical FOV from the current window aspect ratio (`width / height`):
+
+```text
+vfov = 2 × atan(tan(hfov / 2) / aspect)
+```
+
+This keeps the configured 103° horizontal FOV constant when the window aspect
+ratio changes.
+
+---
+
 ## Why `WM_INPUT`, Not Cursor Position
 
 Mouse input is captured via Windows `WM_INPUT` raw relative movement.
