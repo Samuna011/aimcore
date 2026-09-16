@@ -37,8 +37,8 @@ fn integrity_detects_gap_duplicate_ooo_regression() {
     for sample in [
         sample(1, 100),
         sample(3, 300),
-        sample(3, 300),
         sample(2, 200),
+        sample(3, 300),
     ] {
         tracker.observe(&sample);
     }
