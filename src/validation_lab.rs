@@ -4,17 +4,23 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::{
     camera_ctrl::{LiveInputStats, YawPitch},
-    config::ExperimentSettings,
+    config::{ExperimentSettings, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
+    input_plugin::InputIntegrityTracker,
+    session::{database_path, end_validation, reset_counters, start_validation, ValidationSession},
 };
 
 pub fn draw_hud(
     mut contexts: EguiContexts,
     settings: Res<ExperimentSettings>,
-    live_input: Res<LiveInputStats>,
+    mut live_input: ResMut<LiveInputStats>,
     live_frame: Res<LiveFrameStats>,
-    pose: Single<&YawPitch, With<Camera3d>>,
+    mut pose: Single<&mut YawPitch, With<Camera3d>>,
     window: Single<&Window, With<PrimaryWindow>>,
+    mut validation: ResMut<ValidationState>,
+    mut buffers: ResMut<TelemetryBuffers>,
+    integrity: Res<InputIntegrityTracker>,
+    mut session: ResMut<ValidationSession>,
 ) -> bevy::prelude::Result {
     let config = settings.sensitivity_config();
     let edpi = sense_math::edpi(config.dpi, config.sensitivity);
@@ -27,6 +33,69 @@ pub fn draw_hud(
         .show(contexts.ctx_mut()?, |ui| {
             ui.strong("PITCH MODEL: UNVERIFIED");
             ui.colored_label(egui::Color32::YELLOW, "PITCH ROTATION: DISABLED");
+            ui.label(
+                "Perform one continuous horizontal 360° in a single direction without reversing.",
+            );
+            ui.horizontal(|ui| {
+                if ui.button("Reset Camera").clicked() {
+                    pose.yaw_deg = 0.0;
+                }
+                if ui.button("Reset Counters").clicked() {
+                    reset_counters(&mut live_input);
+                    session.status_message = Some("Live counters reset.".into());
+                }
+            });
+            ui.horizontal(|ui| {
+                let start_clicked = ui
+                    .add_enabled(
+                        !validation.is_running(),
+                        egui::Button::new("Start Validation"),
+                    )
+                    .clicked();
+                let end_clicked = ui
+                    .add_enabled(validation.is_running(), egui::Button::new("End Validation"))
+                    .clicked();
+
+                if start_clicked {
+                    if let Err(error) = start_validation(
+                        &settings,
+                        window.physical_width(),
+                        window.physical_height(),
+                        None,
+                        &mut session,
+                        &mut validation,
+                        &mut live_input,
+                        &mut buffers,
+                        &integrity,
+                    ) {
+                        session.status_message = Some(format!("Start failed: {error}"));
+                    }
+                }
+                if end_clicked {
+                    if let Err(error) = end_validation(
+                        settings.sensitivity,
+                        &mut session,
+                        &mut validation,
+                        &live_input,
+                        &buffers,
+                        &integrity,
+                    ) {
+                        session.status_message = Some(format!("End failed: {error}"));
+                    }
+                }
+            });
+            ui.monospace(format!(
+                "STATE: {}",
+                if validation.is_running() {
+                    "RUNNING"
+                } else {
+                    "IDLE"
+                }
+            ));
+            ui.monospace(format!("DATABASE: {}", database_path().display()));
+            if let Some(message) = &session.status_message {
+                ui.label(message);
+            }
             ui.separator();
             ui.monospace(format!("DPI: {:.0}", config.dpi));
             ui.monospace(format!("SENSITIVITY: {:.3}", config.sensitivity));
@@ -72,6 +141,44 @@ pub fn draw_hud(
                 "FRAME TIME: {:.3} ms",
                 live_frame.frame_time_s * 1_000.0
             ));
+            if let Some(result) = &session.last_result {
+                ui.separator();
+                ui.strong("VALIDATION RESULT");
+                ui.monospace(format!("EXPECTED COUNTS: {:.6}", result.expected_counts));
+                ui.monospace(format!(
+                    "OBSERVED NET COUNTS: {:+.6}",
+                    result.observed_net_counts
+                ));
+                ui.monospace(format!(
+                    "OBSERVED ABS PATH: {:.6}",
+                    result.observed_abs_path_counts
+                ));
+                ui.monospace(format!("EXPECTED DEGREES: {:.6}", result.expected_degrees));
+                ui.monospace(format!("OBSERVED DEGREES: {:+.6}", result.observed_degrees));
+                ui.monospace(format!("COUNT DIFFERENCE: {:+.6}", result.count_difference));
+                ui.monospace(format!("ERROR: {:+.6}%", result.error_percent));
+                ui.monospace(format!(
+                    "SAMPLES RECEIVED: {}",
+                    result.integrity.samples_received
+                ));
+                ui.monospace(format!("SEQUENCE GAPS: {}", result.integrity.sequence_gaps));
+                ui.monospace(format!(
+                    "DUPLICATE SEQUENCES: {}",
+                    result.integrity.duplicate_sequences
+                ));
+                ui.monospace(format!(
+                    "OUT OF ORDER: {}",
+                    result.integrity.out_of_order_samples
+                ));
+                ui.monospace(format!(
+                    "TIMESTAMP REGRESSIONS: {}",
+                    result.integrity.timestamp_regressions
+                ));
+                ui.monospace(format!(
+                    "PIPELINE SUSPECT: {}",
+                    result.integrity.is_pipeline_suspect()
+                ));
+            }
         });
 
     let context = contexts.ctx_mut()?;

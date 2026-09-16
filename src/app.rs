@@ -12,6 +12,7 @@ use crate::{
     frame_telemetry::{record_frame_telemetry, LiveFrameStats},
     input_plugin::RawInputPlugin,
     scene::{maintain_horizontal_fov, setup_scene},
+    session::ValidationSession,
     validation_lab::draw_hud,
 };
 
@@ -23,6 +24,7 @@ pub fn run() {
         .init_resource::<InputProcessorState>()
         .init_resource::<LiveInputStats>()
         .init_resource::<LiveFrameStats>()
+        .init_resource::<ValidationSession>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),

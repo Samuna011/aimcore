@@ -17,9 +17,7 @@ pub enum ValidationState {
 
 impl Default for ValidationState {
     fn default() -> Self {
-        // Task 8 replaces this provisional always-active session with explicit
-        // Start Validation / End Validation lifecycle controls.
-        Self::Running
+        Self::Idle
     }
 }
 
@@ -51,5 +49,15 @@ impl ExperimentSettings {
             fov_axis: FovAxis::Horizontal,
             fov_degrees: self.fov_degrees_h,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ValidationState;
+
+    #[test]
+    fn validation_starts_idle() {
+        assert_eq!(ValidationState::default(), ValidationState::Idle);
     }
 }
