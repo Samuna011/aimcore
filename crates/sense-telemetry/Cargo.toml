@@ -1,0 +1,6 @@
+[package]
+name = "sense-telemetry"
+version.workspace = true
+edition.workspace = true
+
+[lib]

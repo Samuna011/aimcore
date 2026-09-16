@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "crates/sense-math",
+    "crates/sense-types",
+    "crates/sense-input-win",
+    "crates/sense-telemetry",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+sense-math = { path = "crates/sense-math" }
+sense-types = { path = "crates/sense-types" }
+sense-input-win = { path = "crates/sense-input-win" }
+sense-telemetry = { path = "crates/sense-telemetry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package]
+name = "sense-maxer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sense-math = { workspace = true }
+sense-types = { workspace = true }
+sense-input-win = { workspace = true }
+sense-telemetry = { workspace = true }

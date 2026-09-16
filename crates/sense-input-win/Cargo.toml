@@ -1,0 +1,6 @@
+[package]
+name = "sense-input-win"
+version.workspace = true
+edition.workspace = true
+
+[lib]

@@ -1,0 +1,6 @@
+[package]
+name = "sense-math"
+version.workspace = true
+edition.workspace = true
+
+[lib]
