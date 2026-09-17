@@ -64,9 +64,6 @@ impl RawAccelLinearConfig {
             CapMode::Io if self.cap_x <= self.input_offset => {
                 return Err("io cap_x must be greater than input_offset".into());
             }
-            CapMode::In if self.cap_x <= 0.0 => {
-                return Err("in cap_x must be greater than 0".into());
-            }
             CapMode::Out
                 if self.gain
                     && self.cap_y > 0.0

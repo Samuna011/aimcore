@@ -50,6 +50,26 @@ fn factory_rawaccel_linear_v110_gain_default_process_finite() {
 }
 
 #[test]
+fn validate_accepts_in_with_zero_cap_x() {
+    let config = RawAccelLinearConfig {
+        cap_mode: CapMode::In,
+        ..RawAccelLinearConfig::trainer_default()
+    };
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn factory_accepts_in_with_zero_cap_x() {
+    let config = RawAccelLinearConfig {
+        cap_mode: CapMode::In,
+        ..RawAccelLinearConfig::trainer_default()
+    };
+    let mut p = create_processor("rawaccel_linear", &config).unwrap();
+    let (ox, oy) = p.process(30.0, 40.0, 0.001);
+    assert!(ox.is_finite() && oy.is_finite());
+}
+
+#[test]
 fn factory_rejects_io_with_zero_cap_x() {
     let config = RawAccelLinearConfig {
         cap_mode: CapMode::Io,
