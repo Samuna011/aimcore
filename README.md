@@ -8,7 +8,9 @@ M1 proves the pipeline end-to-end:
 RAW MOUSE INPUT → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
 ```
 
-See `docs/` for architecture, input model, telemetry schema, experiment design, and the M1 completion report.
+See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), and the M1 completion report.
+
+**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync off, FPS uncapped, WM_INPUT, QPC, NoAcceleration, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable).
 
 ## Requirements
 

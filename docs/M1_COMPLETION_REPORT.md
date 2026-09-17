@@ -286,6 +286,21 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 ## Stop Checkpoint
 
-M1 Validation Lab is functionally validated on hardware with a clean integrity report and ~0.026% human 360° error. **Do not proceed** to STATIC_CLICK, movement segmentation, ML optimization, or export tooling until you explicitly approve the next phase.
+**M1 is COMPLETE and STOPPED** (2026-09-17).
 
-The `0.07` yaw constant remains **UNCERTAIN** pending stronger VALORANT-side confirmation; this run does not justify changing it.
+Locked experimental baseline is recorded in **`docs/BASELINE.md`**:
+
+- VSync OFF / FPS uncapped  
+- WM_INPUT + QPC  
+- `NoAcceleration`  
+- Pitch disabled  
+- Yaw constant `0.07` still **UNCERTAIN**  
+- HFOV 103°  
+- DPI/sensitivity configurable per experiment  
+
+Hardware confirmation: Runs 1–3 (including Run 3 under uncapped / VSync-off) with clean integrity and sub-0.05% freehand 360° error.
+
+**Next milestone:** M2 — InputProcessor framework (not STATIC_CLICK, not Raw Accel math yet).
+
+Do not reopen M1 architecture unless a measured regression appears. Do not skip to M2.x / M3 without completing M2.
+
