@@ -95,11 +95,11 @@ pub fn start_validation(
         return Err("A validation session is already running.".into());
     }
 
-    let processor = sense_accel::create_processor(
-        &settings.processor_id,
+    let processor_config = sense_accel::RawAccelLinearConfig::phase1_sensitivity(
         settings.acceleration,
         settings.sensitivity_multiplier,
-    )?;
+    );
+    let processor = sense_accel::create_processor(&settings.processor_id, &processor_config)?;
     let processor_id = processor.id().to_string();
     let processor_version = processor.version().to_string();
     let processor_config_json = processor.config_json();
