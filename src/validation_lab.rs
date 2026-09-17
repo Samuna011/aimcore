@@ -4,7 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::{
     camera_ctrl::{reset_camera, LiveInputStats, YawPitch},
-    config::{ExperimentSettings, TelemetryBuffers, ValidationState},
+    config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
     session::{database_path, end_validation, reset_counters, start_validation, ValidationSession},
@@ -21,6 +21,7 @@ pub fn draw_hud(
     mut buffers: ResMut<TelemetryBuffers>,
     integrity: Res<InputIntegrityTracker>,
     mut session: ResMut<ValidationSession>,
+    look: Res<LookCapture>,
 ) -> bevy::prelude::Result {
     let config = settings.sensitivity_config();
     let edpi = sense_math::edpi(config.dpi, config.sensitivity);
@@ -33,6 +34,17 @@ pub fn draw_hud(
         .show(contexts.ctx_mut()?, |ui| {
             ui.strong("PITCH MODEL: UNVERIFIED");
             ui.colored_label(egui::Color32::YELLOW, "PITCH ROTATION: DISABLED");
+            if look.enabled {
+                ui.colored_label(
+                    egui::Color32::LIGHT_GREEN,
+                    "LOOK MODE — press ESC to unlock cursor and use buttons",
+                );
+            } else {
+                ui.colored_label(
+                    egui::Color32::LIGHT_BLUE,
+                    "UI MODE — cursor free; press ESC to lock cursor for look / 360°",
+                );
+            }
             ui.label(
                 "Perform one continuous horizontal 360° in a single direction without reversing.",
             );

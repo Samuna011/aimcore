@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use sense_types::{InputCameraSample, InputProcessor, MouseSample, NoAcceleration};
 
 use crate::{
-    config::{ExperimentSettings, TelemetryBuffers, ValidationState},
+    config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
 };
 
@@ -40,10 +40,17 @@ pub fn drain_mouse_to_camera(
     mut live: ResMut<LiveInputStats>,
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
+    look: Res<LookCapture>,
     time: Res<Time>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
+    // While the cursor is free for egui (ESC UI mode), discard queued samples so
+    // pointer movement toward buttons does not rotate the camera or pollute
+    // validation counters / telemetry.
+    if !look.enabled {
+        return;
+    }
     let sample_dt_s = if samples.is_empty() {
         0.0
     } else {

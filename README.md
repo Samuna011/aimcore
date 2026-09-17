@@ -34,15 +34,23 @@ cargo build
 cargo run --release
 ```
 
-Opens the Validation Lab window (1280×720 default). Focus the window to lock the cursor.
+Opens the Validation Lab window (1280×720 default).
+
+**Cursor / UI control**
+
+- Starts in **UI mode** (cursor free) so you can click Start / Reset / End.
+- Press **Esc** to enter **look mode** (cursor locked) for yaw / 360° movement.
+- Press **Esc** again to unlock the cursor and use the Validation Lab buttons.
+- While unlocked, mouse movement is not applied to the camera and is not counted toward validation.
 
 ### Validation Lab workflow
 
-1. **Start Validation** — creates session/config in `data/sense_maxer.db`, resets counters and buffers.
-2. **Reset Camera** — sets yaw to 0° (optional).
-3. Perform **one continuous horizontal 360°** in a single direction without reversing.
-4. **Reset Counters** — retry within the same session (clears live counters and in-memory buffers).
-5. **End Validation** — flushes telemetry, shows expected vs observed counts/degrees, integrity counters, and pipeline-suspect flag.
+1. (UI mode) **Start Validation** — creates session/config in `data/sense_maxer.db`, resets counters and buffers.
+2. Press **Esc** to lock cursor (look mode).
+3. **Reset Camera** if needed — unlock with Esc first if you are in look mode.
+4. Perform **one continuous horizontal 360°** in a single direction without reversing.
+5. Press **Esc** to unlock cursor, then **End Validation**.
+6. **Reset Counters** — retry within the same session (clears live counters and in-memory buffers).
 
 Default settings: DPI 1600, sensitivity 0.175, horizontal FOV 103°.
 

@@ -2,6 +2,20 @@ use bevy::prelude::Resource;
 use sense_telemetry::SessionBuffers;
 use sense_types::{FovAxis, SensitivityConfig};
 
+/// When `true`, cursor is locked for look/validation input.
+/// When `false`, cursor is free so egui Validation Lab buttons can be clicked.
+/// Toggle with Escape. Starts unlocked so Start/Reset are usable immediately.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct LookCapture {
+    pub enabled: bool,
+}
+
+impl Default for LookCapture {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct ExperimentSettings {
     pub dpi: f64,
