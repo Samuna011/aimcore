@@ -82,6 +82,7 @@ pub fn drain_mouse_to_camera(
         let camera_sample = apply_sample(
             &sample,
             processed_dx,
+            processed_dy,
             settings.sensitivity,
             &mut camera,
             &mut live,
@@ -105,7 +106,9 @@ pub fn drain_mouse_to_camera(
 
 pub fn apply_yaw_transform(camera: Single<(&YawPitch, &mut Transform), With<Camera3d>>) {
     let (pose, mut transform) = camera.into_inner();
-    transform.rotation = Quat::from_rotation_y(-(pose.yaw_deg.to_radians() as f32));
+    let yaw = Quat::from_rotation_y(-(pose.yaw_deg.to_radians() as f32));
+    let pitch = Quat::from_rotation_x(pose.pitch_deg.to_radians() as f32);
+    transform.rotation = yaw * pitch;
 }
 
 pub fn reset_camera(
@@ -115,6 +118,7 @@ pub fn reset_camera(
     timestamp_ns: u64,
 ) {
     pose.yaw_deg = 0.0;
+    pose.pitch_deg = 0.0;
     if validation.is_running() {
         buffers.0.input_camera.push(InputCameraSample {
             timestamp_ns,
@@ -129,6 +133,7 @@ pub fn reset_camera(
 fn apply_sample(
     sample: &MouseSample,
     processed_dx: f64,
+    processed_dy: f64,
     sensitivity: f64,
     pose: &mut YawPitch,
     live: &mut LiveInputStats,
@@ -136,6 +141,8 @@ fn apply_sample(
 ) -> InputCameraSample {
     let yaw_delta_deg = sense_math::yaw_delta_deg(processed_dx, sensitivity);
     pose.yaw_deg += yaw_delta_deg;
+    pose.pitch_deg =
+        sense_math::apply_pitch_delta(pose.pitch_deg, processed_dy, sensitivity);
     live.last_dx = sample.dx;
     live.last_dy = sample.dy;
     if accumulate_stats {
@@ -169,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn yaw_updates_and_pitch_remains_frozen() {
+    fn yaw_and_pitch_update_from_processed_deltas() {
         let sample = MouseSample {
             timestamp_ns: 1,
             dx: 10,
@@ -182,23 +189,36 @@ mod tests {
             pitch_deg: 11.0,
         };
         let mut live = LiveInputStats::default();
-        apply_sample(&sample, 10.0, 0.5, &mut pose, &mut live, true);
+        apply_sample(&sample, 10.0, -4.0, 0.5, &mut pose, &mut live, true);
         assert_eq!(pose.yaw_deg, 2.35);
-        assert_eq!(pose.pitch_deg, 11.0);
+        // Negative processed_dy → look up (+pitch_deg increases).
+        assert_eq!(pose.pitch_deg, 11.14);
         assert_eq!((live.net_dx, live.net_dy, live.abs_dx), (10, -4, 10));
+
+        let down_sample = MouseSample {
+            timestamp_ns: 2,
+            dx: 0,
+            dy: 100,
+            buttons: 0,
+            sequence_number: 2,
+        };
+        apply_sample(&down_sample, 0.0, 100.0, 0.5, &mut pose, &mut live, true);
+        // Positive processed_dy → look down (+pitch_deg decreases).
+        assert!(pose.pitch_deg < 11.14);
     }
 
     #[test]
-    fn running_camera_reset_records_zero_yaw_sample() {
+    fn running_camera_reset_clears_yaw_and_pitch() {
         let mut pose = YawPitch {
             yaw_deg: 42.0,
-            pitch_deg: 0.0,
+            pitch_deg: 15.0,
         };
         let mut buffers = TelemetryBuffers::default();
 
         reset_camera(&mut pose, &mut buffers, ValidationState::Running, 123);
 
         assert_eq!(pose.yaw_deg, 0.0);
+        assert_eq!(pose.pitch_deg, 0.0);
         assert_eq!(
             buffers.0.input_camera,
             vec![InputCameraSample {
