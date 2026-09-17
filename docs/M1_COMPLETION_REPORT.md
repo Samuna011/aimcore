@@ -101,7 +101,7 @@ Implemented in `src/fov.rs`; updated on window resize via `maintain_horizontal_f
 - Pitch frozen at default (0°); vertical mouse input recorded but does not rotate camera.
 - Transform applied via `Quat::from_rotation_y(-yaw_deg)`.
 - Simple scene: floor plane, placeholder cube, egui crosshair overlay.
-- Cursor locked when window focused.
+- Cursor: starts unlocked (UI mode); **Esc** locks for look / 360°; **Esc** again unlocks for menu buttons. While unlocked, queued samples are drained and discarded (not applied to camera or validation counters).
 
 ---
 
