@@ -209,24 +209,28 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 ### Run 3 — VSync OFF / FPS uncapped (rendering config verification)
 
-**Purpose:** Confirm that `PresentMode::AutoNoVsync` and uncapped rendering do not change raw-input integrity or yaw math. Same DPI/sens/procedure as Run 2 where practical (3200 DPI / 0.09).
+**Purpose:** Confirm that `PresentMode::AutoNoVsync` and uncapped rendering do not change raw-input integrity or yaw math. Same DPI/sens/procedure as Run 2 (3200 DPI / 0.09).
 
 **Config change:** Window `present_mode = PresentMode::AutoNoVsync`. No application FPS cap. Input pipeline unchanged. No mouse-to-photon latency claim.
 
 | Field | Value |
 |-------|-------|
 | Present mode | AutoNoVsync (VSync OFF requested) |
-| DPI / Sensitivity | 3200 / 0.09 (same as Run 2) |
-| Expected counts | |
-| Observed net counts | |
-| Observed abs path | |
-| Observed degrees | |
-| Error % | |
-| Pipeline suspect | |
-| FPS / frame time notes | |
-| Operator notes | |
+| DPI / Sensitivity / eDPI | 3200 / 0.09 / 288 |
+| Expected counts | 57142.857143 |
+| Observed net counts | +57126.000000 |
+| Observed abs path counts | 58022.000000 |
+| Expected degrees | 360.000000 |
+| Observed degrees | +359.893800 |
+| Count difference | −16.857143 |
+| Error % | −0.029500% |
+| Samples received | 4570 |
+| Integrity faults | all 0 |
+| Pipeline suspect | **false** |
 
-*(Fill after the verification 360° run.)*
+**Interpretation:** Integrity remains clean under uncapped/VSync-off rendering. Net error (−0.0295%) is in the same freehand band as Run 1 (−0.026%) and Run 2 (−0.049%). Expected counts unchanged vs Run 2 (sensitivity path untouched). Abs path (58022) − net (57126) ≈ 896 counts of reverse/micro-correction — higher path waste than Run 2, still consistent with human sweep behavior, not with sequence/pipeline faults.
+
+**Conclusion:** Changing presentation mode did **not** break raw-sample integrity or yaw math. M1 foundation remains complete. Do not proceed to M2 / Raw Accel / STATIC_CLICK until explicitly approved.
 
 ---
 
