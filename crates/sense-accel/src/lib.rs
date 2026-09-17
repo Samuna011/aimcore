@@ -34,6 +34,78 @@ pub fn create_processor(id: &str) -> Result<Box<dyn InputProcessor>, String> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinearEval {
+    pub raw_dx: f64,
+    pub raw_dy: f64,
+    pub dt_ms: f64,
+    pub input_speed: f64,
+    pub acceleration_scale: f64,
+    pub processed_dx: f64,
+    pub processed_dy: f64,
+    pub bypassed_nonpositive_dt: bool,
+}
+
+pub fn vector_speed_counts_per_ms(dx: f64, dy: f64, dt_ms: f64) -> f64 {
+    (dx * dx + dy * dy).sqrt() / dt_ms
+}
+
+pub fn linear_acceleration_scale(v: f64, acceleration: f64) -> f64 {
+    1.0 + acceleration * v
+}
+
+pub fn apply_whole(
+    dx: f64,
+    dy: f64,
+    acceleration_scale: f64,
+    sensitivity_multiplier: f64,
+) -> (f64, f64) {
+    let factor = acceleration_scale * sensitivity_multiplier;
+    (dx * factor, dy * factor)
+}
+
+/// Raw Accel Linear (Legacy / Sensitivity), reproduced according to the official
+/// implementation; mathematically equivalent to Classic with exponent 2 where the
+/// documented equivalence applies.
+/// Demonstrates documented mathematical behavior — not actual-driver parity.
+pub fn eval_rawaccel_linear(
+    dx: f64,
+    dy: f64,
+    dt_s: f64,
+    acceleration: f64,
+    sensitivity_multiplier: f64,
+) -> LinearEval {
+    let dt_ms = dt_s * 1000.0;
+    if dt_ms <= 0.0 {
+        return LinearEval {
+            raw_dx: dx,
+            raw_dy: dy,
+            dt_ms,
+            input_speed: 0.0,
+            acceleration_scale: 1.0,
+            processed_dx: dx,
+            processed_dy: dy,
+            bypassed_nonpositive_dt: true,
+        };
+    }
+
+    let input_speed = vector_speed_counts_per_ms(dx, dy, dt_ms);
+    let acceleration_scale = linear_acceleration_scale(input_speed, acceleration);
+    let (processed_dx, processed_dy) =
+        apply_whole(dx, dy, acceleration_scale, sensitivity_multiplier);
+
+    LinearEval {
+        raw_dx: dx,
+        raw_dy: dy,
+        dt_ms,
+        input_speed,
+        acceleration_scale,
+        processed_dx,
+        processed_dy,
+        bypassed_nonpositive_dt: false,
+    }
+}
+
 /// Inter-sample interval from consecutive raw QPC timestamps (nanoseconds).
 ///
 /// Uses only monotonic raw mouse-event timestamps — never render-frame delta,
