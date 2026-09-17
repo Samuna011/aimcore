@@ -183,7 +183,7 @@ pub fn draw_hud(
             ));
             ui.separator();
             ui.monospace(format!("PRESENT MODE: {:?}", window.present_mode));
-            ui.small("VSync: OFF requested (PresentMode::AutoNoVsync). FPS uncapped; no 240 FPS app limit.");
+            ui.small("VSync: ON (PresentMode::AutoVsync). FPS capped to display refresh. Input remains WM_INPUT-driven, not frame-locked.");
             ui.monospace(format!("FPS: {:.1}", live_frame.fps));
             ui.monospace(format!(
                 "FRAME TIME: {:.3} ms",

@@ -32,9 +32,9 @@ pub fn run() {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
                 resolution: WindowResolution::new(1280, 720),
-                // VSync OFF / uncapped: prefer Immediate, then Mailbox; Fifo only if neither available.
-                // Does not measure mouse-to-photon latency. Does not couple input to render FPS.
-                present_mode: PresentMode::AutoNoVsync,
+                // Baseline (post-M1): VSync ON — FPS capped to display refresh via presentation.
+                // Uncapped / AutoNoVsync was a temporary M1 verification condition only.
+                present_mode: PresentMode::AutoVsync,
                 ..default()
             }),
             ..default()

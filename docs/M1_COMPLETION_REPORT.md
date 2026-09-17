@@ -290,7 +290,8 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 Locked experimental baseline is recorded in **`docs/BASELINE.md`**:
 
-- VSync OFF / FPS uncapped  
+- VSync **ON** / FPS capped to display refresh (`PresentMode::AutoVsync`)  
+  *(Run 3’s uncapped / VSync-off condition was temporary verification only.)*  
 - WM_INPUT + QPC  
 - `NoAcceleration`  
 - Pitch disabled  

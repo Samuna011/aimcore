@@ -10,7 +10,7 @@ RAW MOUSE INPUT → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TE
 
 See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), and the M1 completion report.
 
-**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync off, FPS uncapped, WM_INPUT, QPC, NoAcceleration, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable).
+**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync **ON** / FPS capped to refresh, WM_INPUT, QPC, NoAcceleration, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable). Uncapped VSync-off was a temporary M1 verification only.
 
 ## Requirements
 

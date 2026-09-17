@@ -9,11 +9,15 @@ This is the default experimental condition for all subsequent milestones (M2+) u
 
 | Setting | Value |
 |---------|--------|
-| VSync | **OFF** (`PresentMode::AutoNoVsync`) |
-| FPS | **Uncapped** (no application FPS cap; no 240 FPS limit) |
+| VSync | **ON** (`PresentMode::AutoVsync`) |
+| FPS | **Capped to display refresh** via VSync (no separate application FPS limiter) |
 | Frame telemetry | Records **actual** frame time / FPS |
 
-Uncapped / VSync-off does **not** constitute a measured mouse-to-photon latency claim.
+**History:** Run 3 temporarily used `AutoNoVsync` / uncapped FPS only to verify that presentation mode does not break the raw-input pipeline. That was **not** adopted as the lasting baseline. Do not switch back to uncapped / VSync-off unless the experimenter explicitly requests it.
+
+VSync / refresh capping does **not** couple WM_INPUT sampling to render FPS. Input remains event-driven and queue-drained independently.
+
+M1 does **not** claim measured mouse-to-photon latency for any present mode.
 
 ## Input
 
@@ -46,7 +50,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 | Sensitivity | 0.09 |
 | eDPI | 288 |
 
-Changing DPI/sens for an experiment is expected. Changing VSync/FPS/raw-input/QPC/NoAcceleration/pitch-disabled/0.07/HFOV=103 requires an explicit experiment version bump and documentation.
+Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch-disabled, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
 ## Research progression (locked order)
 

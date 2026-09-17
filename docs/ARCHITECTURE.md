@@ -151,11 +151,12 @@ RAW INPUT → timestamped queue → process every sample → camera yaw + teleme
 - Movement intervals use monotonic clock (`QueryPerformanceCounter` → ns). Session metadata may use wall clock.
 - M1 does **not** claim end-to-end display latency measurement; architecture reserves hooks for future instrumentation.
 
-### Presentation / VSync (M1 verification config)
+### Presentation / VSync (locked baseline)
 
-- Window `present_mode = PresentMode::AutoNoVsync` (VSync OFF when Immediate or Mailbox is available; may fall back to Fifo if the GPU/OS cannot offer either).
-- No application FPS cap (including no 240 FPS limit). Frame telemetry records actual frame time / FPS.
-- Render cadence remains independent of WM_INPUT sampling. Uncapped rendering does **not** imply measured mouse-to-photon latency improvement.
+- Window `present_mode = PresentMode::AutoVsync` (**VSync ON**; FPS capped to display refresh).
+- No separate application FPS limiter (refresh rate is the cap).
+- Run 3 temporarily used `AutoNoVsync` / uncapped only as an M1 verification condition; that is **not** the lasting baseline.
+- Render cadence remains independent of WM_INPUT sampling. Present mode does **not** imply measured mouse-to-photon latency.
 
 ---
 
