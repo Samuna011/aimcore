@@ -1,7 +1,7 @@
 # M2.x Phase 1 — Raw Accel Linear — Design Spec
 
 **Date:** 2026-09-17  
-**Status:** Draft for user review  
+**Status:** Approved for implementation  
 **Depends on:** M2 COMPLETE (`docs/M2_PROCESSOR.md`); `docs/BASELINE.md`  
 **Scope:** Faithful, deliberately limited reproduction of **Raw Accel Linear** as an `InputProcessor` — **not** a generic acceleration framework and **not** full Raw Accel parity
 
@@ -17,14 +17,14 @@ WM_INPUT
   → QPC inter-sample dt
   → dt_ms
   → Whole vector speed (counts/ms)
-  → Raw Accel Linear scale
+  → Raw Accel Linear scale (Legacy / Sensitivity)
   → sensitivity multiplier
   → processed dx/dy
   → existing VALORANT sensitivity × 0.07
   → yaw / camera
 ```
 
-M2.x Phase 1 proves we can reproduce **Raw Accel Linear** according to the official implementation (Guide + source), with unit-test proof before trusting live trainer behavior.
+M2.x Phase 1 demonstrates reproduction of the **documented mathematical behavior** of **Raw Accel Linear** (Guide + source), with unit-test proof before trusting live trainer behavior. Actual-driver comparison is **out of scope** until a later cycle; until then, do not claim full Raw Accel reproduction.
 
 ---
 
@@ -32,16 +32,17 @@ M2.x Phase 1 proves we can reproduce **Raw Accel Linear** according to the offic
 
 | Surface | Value |
 |---------|--------|
-| Human name | **Raw Accel Linear** |
+| Human name | **Raw Accel Linear** (Legacy / Sensitivity) |
 | Factory / telemetry id | `rawaccel_linear` |
 | Processor version | `1.0.0` |
 | Struct | `RawAccelLinear` implementing `InputProcessor` |
+| Selected mode | **Linear** + **Legacy / Sensitivity** (not Gain) |
 
 **Provenance wording (required in docs and code comments):**
 
-> Raw Accel Linear, reproduced according to the official implementation; mathematically equivalent to Classic with exponent 2 **where the documented equivalence applies**.
+> Raw Accel Linear (Legacy / Sensitivity), reproduced according to the official implementation; mathematically equivalent to Classic with exponent 2 **where the documented equivalence applies**.
 
-We implement **Linear**, not “Classic and calling it Linear.” Do not brand the feature as “Classic² / Linear.”
+We implement **Linear + Legacy/Sensitivity**, not “Classic and calling it Linear,” and not Gain mode. Do not brand the feature as “Classic² / Linear.”
 
 ---
 
@@ -88,7 +89,7 @@ Units: **counts/ms**. The Guide example `(30,40)` over 1 ms → `v = 50` is cons
 
 ### 4.3 Linear scale and apply
 
-Sensitivity / legacy Linear path with inactive offset/cap (Phase 1 defaults):
+**Linear + Legacy / Sensitivity** mode with inactive offset/cap (Phase 1):
 
 \[
 \text{acceleration\_scale} = 1 + a \cdot v
@@ -142,11 +143,11 @@ bypassed_nonpositive_dt = false
 
 Only these two parameters in Phase 1.
 
-**Idle / session defaults** (explicit, editable while Idle):
+**Idle / session defaults** (explicit **trainer** defaults, editable while Idle — **not** claimed as official Raw Accel GUI/driver defaults):
 
 | Field | Default | Notes |
 |-------|---------|--------|
-| `acceleration` | `0.01` | Matches Guide example magnitude; user may change before Start |
+| `acceleration` | `0.01` | **Trainer default** chosen to match the Guide example’s magnitude for convenient local checks; **not** an official Raw Accel default |
 | `sensitivity_multiplier` | `1.0` | Neutral RA multiplier; Guide’s `0.5` is for the unit-test vector, not the live default |
 
 **Deferred (not in Phase 1 config):** input offset, output cap, Gain switch, By Component, anisotropy, EMA coalescing, DPI normalization, Classic general exponent, lookup tables.
@@ -205,7 +206,7 @@ SQLite columns for these fields are **out of scope** for Phase 1 unless trivial;
 |-------|--------|------------|
 | Guide Linear example: speed from whole magnitude; \((1 + a\cdot v)\cdot m\); \((30,40)\) @ 1 ms → sens \(0.75\), output velocity \(37.5\) | [Guide.md](https://github.com/RawAccelOfficial/rawaccel/blob/master/doc/Guide.md) Example | **CONFIRMED** |
 | Whole-mode: scale entire vector by sensitivity function | Guide Whole section | **CONFIRMED** |
-| Official tree has no separate Linear type; Linear matches Classic with exponent 2 on the Sensitivity/legacy path when offset/cap are inactive as in the Guide example | `accel-classic.hpp`, `accel-union.hpp`, `rawaccel-base.hpp` | **DERIVED** (equivalence where documented; we still implement Linear, not general Classic) |
+| Official tree has no separate Linear type; Linear + Legacy/Sensitivity matches Classic with exponent 2 when offset/cap are inactive as in the Guide example | `accel-classic.hpp`, `accel-union.hpp`, `rawaccel-base.hpp` | **DERIVED** (equivalence where documented; we still implement Linear + Legacy/Sensitivity, not general Classic or Gain) |
 | QPC `dt_s` → `dt_ms` for speed formula | Our M2 time base mapped to Guide units | **DERIVED** |
 | `dt_ms ≤ 0` → identity + defined debug fields | Trainer implementation boundary | **EXPLICIT** (not RA-attributed) |
 
@@ -262,7 +263,7 @@ One negative-vector case is enough for the minimum suite (mixed-sign optional la
 
 ## 10. Success Criteria
 
-- `RawAccelLinear` reproduces Guide vector and minimum suite in unit tests
+- `RawAccelLinear` matches Guide vector and minimum suite in unit tests (documented math; not actual-driver proof)
 - Processor selectable as `rawaccel_linear` at session start; config snapshotted
 - Dual telemetry continues; raw immutable
 - Debug/in-memory path exposes `dt_ms`, `input_speed`, `acceleration_scale`, bypass flag
@@ -281,5 +282,6 @@ Further Raw Accel modes, Gain, caps/offsets, or driver-side comparison are separ
 
 ## Revision Notes
 
-- **2026-09-17:** Approach 1 (minimal faithful Linear). Naming: Raw Accel Linear reproduced from official implementation; Classic exponent-2 equivalence only where documented. Explicit `v = sqrt((dx * dx) + (dy * dy)) / dt_ms`; trainer `dt_ms≤0` boundary with defined debug fields; mandatory Guide + sign-preservation tests; debug fields before DB columns.
+- **2026-09-17:** Approach 1 (minimal faithful Linear + Legacy/Sensitivity). Naming: Raw Accel Linear reproduced from official implementation; Classic exponent-2 equivalence only where documented. Explicit `v = sqrt((dx * dx) + (dy * dy)) / dt_ms`; trainer `dt_ms≤0` boundary with defined debug fields; mandatory Guide + sign-preservation tests; debug fields before DB columns.
 - **2026-09-17:** Speed formula rewritten in unambiguous code form (no LaTeX fraction ambiguity).
+- **2026-09-17:** Approval wording: mode = Linear + Legacy/Sensitivity; `acceleration=0.01` is a trainer default only; Phase 1 “demonstrates documented mathematical behavior,” not actual-driver reproduction proof.
