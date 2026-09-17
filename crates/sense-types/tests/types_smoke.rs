@@ -1,8 +1,7 @@
 use sense_math::{edpi, VALORANT_YAW_DEG_PER_COUNT_AT_SENS_1};
 use sense_types::{
     AccelerationConfig, ConfigurationRecord, DisplayConfig, FovAxis, InputCameraSample,
-    InputIntegrityReport, InputProcessor, MouseSample, NoAcceleration, SensitivityConfig,
-    SessionRecord, ValidationResult,
+    InputIntegrityReport, MouseSample, SensitivityConfig, SessionRecord, ValidationResult,
 };
 
 #[test]
@@ -56,12 +55,6 @@ fn validation_result_constructs() {
         integrity,
     };
     assert_eq!(result.expected_degrees, 360.0);
-}
-
-#[test]
-fn no_acceleration_is_identity() {
-    let mut proc = NoAcceleration;
-    assert_eq!(proc.process(10.0, -3.0, 0.016), (10.0, -3.0));
 }
 
 #[test]

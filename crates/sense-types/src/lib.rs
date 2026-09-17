@@ -105,15 +105,3 @@ pub struct ValidationResult {
     pub error_percent: f64,
     pub integrity: InputIntegrityReport,
 }
-
-pub trait InputProcessor {
-    fn process(&mut self, dx: f64, dy: f64, dt_s: f64) -> (f64, f64);
-}
-
-pub struct NoAcceleration;
-
-impl InputProcessor for NoAcceleration {
-    fn process(&mut self, dx: f64, dy: f64, _dt_s: f64) -> (f64, f64) {
-        (dx, dy)
-    }
-}

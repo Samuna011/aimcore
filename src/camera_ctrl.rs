@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use sense_types::{InputCameraSample, InputProcessor, MouseSample, NoAcceleration};
+use sense_accel::{InputProcessor, NoAcceleration};
+use sense_types::{InputCameraSample, MouseSample};
 
 use crate::{
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},

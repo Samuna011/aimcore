@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     ".",
+    "crates/sense-accel",
     "crates/sense-math",
     "crates/sense-types",
     "crates/sense-input-win",
@@ -14,6 +15,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
+sense-accel = { path = "crates/sense-accel" }
 sense-math = { path = "crates/sense-math" }
 sense-types = { path = "crates/sense-types" }
 sense-input-win = { path = "crates/sense-input-win" }
@@ -29,6 +31,7 @@ edition.workspace = true
 [dependencies]
 bevy = "=0.19.1"
 bevy_egui = "=0.42.0"
+sense-accel = { workspace = true }
 sense-math = { workspace = true }
 sense-types = { workspace = true }
 sense-input-win = { workspace = true }
