@@ -12,7 +12,7 @@ use crate::{
 
 pub fn draw_hud(
     mut contexts: EguiContexts,
-    settings: Res<ExperimentSettings>,
+    mut settings: ResMut<ExperimentSettings>,
     mut live_input: ResMut<LiveInputStats>,
     live_frame: Res<LiveFrameStats>,
     mut pose: Single<&mut YawPitch, With<Camera3d>>,
@@ -23,10 +23,6 @@ pub fn draw_hud(
     mut session: ResMut<ValidationSession>,
     look: Res<LookCapture>,
 ) -> bevy::prelude::Result {
-    let config = settings.sensitivity_config();
-    let edpi = sense_math::edpi(config.dpi, config.sensitivity);
-    let cm_per_360 = sense_math::cm_per_360(config.dpi, config.sensitivity);
-
     egui::Window::new("VALORANT VALIDATION LAB")
         .anchor(egui::Align2::LEFT_TOP, [12.0, 12.0])
         .resizable(false)
@@ -120,6 +116,33 @@ pub fn draw_hud(
                 ui.label(message);
             }
             ui.separator();
+            ui.label("Declared mouse DPI (must match Logitech setting). Does not change yaw math.");
+            ui.add_enabled_ui(!validation.is_running(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("DPI");
+                    ui.add(
+                        egui::DragValue::new(&mut settings.dpi)
+                            .speed(50.0)
+                            .range(100.0..=25600.0)
+                            .fixed_decimals(0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Sensitivity");
+                    ui.add(
+                        egui::DragValue::new(&mut settings.sensitivity)
+                            .speed(0.001)
+                            .range(0.001..=10.0)
+                            .fixed_decimals(3),
+                    );
+                });
+            });
+            if validation.is_running() {
+                ui.small("DPI/sensitivity locked while validation is running (snapshotted at Start).");
+            }
+            let config = settings.sensitivity_config();
+            let edpi = sense_math::edpi(config.dpi, config.sensitivity);
+            let cm_per_360 = sense_math::cm_per_360(config.dpi, config.sensitivity);
             ui.monospace(format!("DPI: {:.0}", config.dpi));
             ui.monospace(format!("SENSITIVITY: {:.3}", config.sensitivity));
             ui.monospace(format!("eDPI: {edpi:.1}"));

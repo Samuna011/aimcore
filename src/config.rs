@@ -46,8 +46,10 @@ pub struct TelemetryBuffers(pub SessionBuffers);
 
 impl Default for ExperimentSettings {
     fn default() -> Self {
+        // Declared hardware DPI for eDPI / cm/360 metadata.
+        // Does NOT enter camera yaw math (degrees_per_count uses sensitivity only).
         Self {
-            dpi: 1600.0,
+            dpi: 3200.0,
             sensitivity: 0.175,
             fov_degrees_h: 103.0,
         }

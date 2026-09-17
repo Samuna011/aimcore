@@ -182,6 +182,8 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 **Residual uncertainty:** A human 360° cannot prove bit-exact VALORANT equivalence. Stronger confirmation would need a mechanical/reference rotation or a side-by-side count comparison against VALORANT under identical DPI/sens — still separate from this healthy first instrument run.
 
+**DPI metadata correction:** The operator’s Logitech mouse was set to **3200 DPI**, but this first session used the app default of **1600 DPI** in the configuration snapshot. That does **not** invalidate the counts→degrees result (yaw math ignores DPI). It does mean stored **eDPI** and **cm/360** for that session were wrong relative to physical mouse distance. App default DPI is now **3200**; DPI is editable in the HUD while Idle.
+
 ---
 
 ## 12. Known Uncertainties
