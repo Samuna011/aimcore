@@ -75,6 +75,24 @@ pub fn apply_yaw_transform(camera: Single<(&YawPitch, &mut Transform), With<Came
     transform.rotation = Quat::from_rotation_y(-(pose.yaw_deg.to_radians() as f32));
 }
 
+pub fn reset_camera(
+    pose: &mut YawPitch,
+    buffers: &mut TelemetryBuffers,
+    validation: ValidationState,
+    timestamp_ns: u64,
+) {
+    pose.yaw_deg = 0.0;
+    if validation.is_running() {
+        buffers.0.input_camera.push(InputCameraSample {
+            timestamp_ns,
+            yaw_deg: pose.yaw_deg,
+            pitch_deg: pose.pitch_deg,
+            // Raw mouse sequences start at 1; zero identifies a camera-reset sample.
+            sequence_number: 0,
+        });
+    }
+}
+
 fn apply_sample(
     sample: &MouseSample,
     processed_dx: f64,
@@ -126,5 +144,27 @@ mod tests {
         assert_eq!(pose.yaw_deg, 2.35);
         assert_eq!(pose.pitch_deg, 11.0);
         assert_eq!((live.net_dx, live.net_dy, live.abs_dx), (10, -4, 10));
+    }
+
+    #[test]
+    fn running_camera_reset_records_zero_yaw_sample() {
+        let mut pose = YawPitch {
+            yaw_deg: 42.0,
+            pitch_deg: 0.0,
+        };
+        let mut buffers = TelemetryBuffers::default();
+
+        reset_camera(&mut pose, &mut buffers, ValidationState::Running, 123);
+
+        assert_eq!(pose.yaw_deg, 0.0);
+        assert_eq!(
+            buffers.0.input_camera,
+            vec![InputCameraSample {
+                timestamp_ns: 123,
+                yaw_deg: 0.0,
+                pitch_deg: 0.0,
+                sequence_number: 0,
+            }]
+        );
     }
 }

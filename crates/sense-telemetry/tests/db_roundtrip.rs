@@ -84,8 +84,6 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
             fps: 240.0,
         }],
     };
-    db.flush_buffers(&session.id, &buffers).unwrap();
-
     let result = ValidationResult {
         expected_counts: 9.0,
         observed_net_counts: 9.0,
@@ -102,7 +100,9 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
             timestamp_regressions: 0,
         },
     };
-    db.insert_validation_result(&session.id, &result).unwrap();
+    let end_unix_ms = 1_700_000_001_234;
+    db.complete_validation(&session.id, &buffers, &result, end_unix_ms)
+        .unwrap();
 
     for (table, expected) in [
         ("raw_mouse_events", 2),
@@ -118,4 +118,14 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
             .unwrap();
         assert_eq!(count, expected, "unexpected row count in {table}");
     }
+
+    let stored_end_unix_ms: i64 = db
+        .connection
+        .query_row(
+            "SELECT end_unix_ms FROM sessions WHERE id = ?1",
+            [&session.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_end_unix_ms, end_unix_ms);
 }

@@ -190,41 +190,7 @@ INSERT INTO sessions (
         session_id: &str,
         result: &ValidationResult,
     ) -> Result<(), String> {
-        self.connection
-            .execute(
-                r#"
-INSERT INTO validation_results (
-  session_id, expected_counts, observed_net_counts, observed_abs_path_counts,
-  expected_degrees, observed_degrees, count_difference, error_percent,
-  samples_received, sequence_gaps, duplicate_sequences, out_of_order_samples,
-  timestamp_regressions, pipeline_suspect
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"#,
-                params![
-                    session_id,
-                    result.expected_counts,
-                    result.observed_net_counts,
-                    result.observed_abs_path_counts,
-                    result.expected_degrees,
-                    result.observed_degrees,
-                    result.count_difference,
-                    result.error_percent,
-                    as_i64(result.integrity.samples_received, "samples received")?,
-                    as_i64(result.integrity.sequence_gaps, "sequence gaps")?,
-                    as_i64(result.integrity.duplicate_sequences, "duplicate sequences")?,
-                    as_i64(
-                        result.integrity.out_of_order_samples,
-                        "out-of-order samples"
-                    )?,
-                    as_i64(
-                        result.integrity.timestamp_regressions,
-                        "timestamp regressions"
-                    )?,
-                    result.integrity.is_pipeline_suspect(),
-                ],
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+        write_validation_result(&self.connection, session_id, result)
     }
 
     pub fn flush_buffers(&self, session_id: &str, buffers: &SessionBuffers) -> Result<(), String> {
@@ -232,78 +198,150 @@ INSERT INTO validation_results (
             .connection
             .unchecked_transaction()
             .map_err(|error| error.to_string())?;
+        write_buffers(&transaction, session_id, buffers)?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
 
-        {
-            let mut statement = transaction
-                .prepare(
-                    r#"
+    pub fn complete_validation(
+        &self,
+        session_id: &str,
+        buffers: &SessionBuffers,
+        result: &ValidationResult,
+        end_unix_ms: i64,
+    ) -> Result<(), String> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        write_buffers(&transaction, session_id, buffers)?;
+        write_validation_result(&transaction, session_id, result)?;
+        transaction
+            .execute(
+                "UPDATE sessions SET end_unix_ms = ? WHERE id = ?",
+                params![end_unix_ms, session_id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
+}
+
+fn write_validation_result(
+    connection: &Connection,
+    session_id: &str,
+    result: &ValidationResult,
+) -> Result<(), String> {
+    connection
+        .execute(
+            r#"
+INSERT INTO validation_results (
+  session_id, expected_counts, observed_net_counts, observed_abs_path_counts,
+  expected_degrees, observed_degrees, count_difference, error_percent,
+  samples_received, sequence_gaps, duplicate_sequences, out_of_order_samples,
+  timestamp_regressions, pipeline_suspect
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+            params![
+                session_id,
+                result.expected_counts,
+                result.observed_net_counts,
+                result.observed_abs_path_counts,
+                result.expected_degrees,
+                result.observed_degrees,
+                result.count_difference,
+                result.error_percent,
+                as_i64(result.integrity.samples_received, "samples received")?,
+                as_i64(result.integrity.sequence_gaps, "sequence gaps")?,
+                as_i64(result.integrity.duplicate_sequences, "duplicate sequences")?,
+                as_i64(
+                    result.integrity.out_of_order_samples,
+                    "out-of-order samples"
+                )?,
+                as_i64(
+                    result.integrity.timestamp_regressions,
+                    "timestamp regressions"
+                )?,
+                result.integrity.is_pipeline_suspect(),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn write_buffers(
+    connection: &Connection,
+    session_id: &str,
+    buffers: &SessionBuffers,
+) -> Result<(), String> {
+    {
+        let mut statement = connection
+            .prepare(
+                r#"
 INSERT INTO raw_mouse_events (
   session_id, sequence_number, timestamp_ns, dx, dy, buttons
 ) VALUES (?, ?, ?, ?, ?, ?)
 "#,
-                )
+            )
+            .map_err(|error| error.to_string())?;
+        for sample in &buffers.mouse {
+            statement
+                .execute(params![
+                    session_id,
+                    as_i64(sample.sequence_number, "mouse sequence number")?,
+                    as_i64(sample.timestamp_ns, "mouse timestamp")?,
+                    sample.dx,
+                    sample.dy,
+                    sample.buttons,
+                ])
                 .map_err(|error| error.to_string())?;
-            for sample in &buffers.mouse {
-                statement
-                    .execute(params![
-                        session_id,
-                        as_i64(sample.sequence_number, "mouse sequence number")?,
-                        as_i64(sample.timestamp_ns, "mouse timestamp")?,
-                        sample.dx,
-                        sample.dy,
-                        sample.buttons,
-                    ])
-                    .map_err(|error| error.to_string())?;
-            }
         }
+    }
 
-        {
-            let mut statement = transaction
-                .prepare(
-                    r#"
+    {
+        let mut statement = connection
+            .prepare(
+                r#"
 INSERT INTO input_camera_samples (
   session_id, sequence_number, timestamp_ns, yaw_deg, pitch_deg
 ) VALUES (?, ?, ?, ?, ?)
 "#,
-                )
+            )
+            .map_err(|error| error.to_string())?;
+        for sample in &buffers.input_camera {
+            statement
+                .execute(params![
+                    session_id,
+                    as_i64(sample.sequence_number, "input camera sequence number")?,
+                    as_i64(sample.timestamp_ns, "input camera timestamp")?,
+                    sample.yaw_deg,
+                    sample.pitch_deg,
+                ])
                 .map_err(|error| error.to_string())?;
-            for sample in &buffers.input_camera {
-                statement
-                    .execute(params![
-                        session_id,
-                        as_i64(sample.sequence_number, "input camera sequence number")?,
-                        as_i64(sample.timestamp_ns, "input camera timestamp")?,
-                        sample.yaw_deg,
-                        sample.pitch_deg,
-                    ])
-                    .map_err(|error| error.to_string())?;
-            }
         }
+    }
 
-        {
-            let mut statement = transaction
-                .prepare(
-                    r#"
+    {
+        let mut statement = connection
+            .prepare(
+                r#"
 INSERT INTO frame_samples (
   session_id, timestamp_ns, frame_time_s, fps
 ) VALUES (?, ?, ?, ?)
 "#,
-                )
+            )
+            .map_err(|error| error.to_string())?;
+        for sample in &buffers.frames {
+            statement
+                .execute(params![
+                    session_id,
+                    as_i64(sample.timestamp_ns, "frame timestamp")?,
+                    sample.frame_time_s,
+                    sample.fps,
+                ])
                 .map_err(|error| error.to_string())?;
-            for sample in &buffers.frames {
-                statement
-                    .execute(params![
-                        session_id,
-                        as_i64(sample.timestamp_ns, "frame timestamp")?,
-                        sample.frame_time_s,
-                        sample.fps,
-                    ])
-                    .map_err(|error| error.to_string())?;
-            }
         }
-
-        transaction.commit().map_err(|error| error.to_string())
     }
+
+    Ok(())
 }
 
 fn as_i64(value: u64, field: &str) -> Result<i64, String> {

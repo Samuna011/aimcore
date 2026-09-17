@@ -3,7 +3,7 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::{
-    camera_ctrl::{LiveInputStats, YawPitch},
+    camera_ctrl::{reset_camera, LiveInputStats, YawPitch},
     config::{ExperimentSettings, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
@@ -38,14 +38,22 @@ pub fn draw_hud(
             );
             ui.horizontal(|ui| {
                 if ui.button("Reset Camera").clicked() {
-                    pose.yaw_deg = 0.0;
+                    reset_camera(
+                        &mut pose,
+                        &mut buffers,
+                        *validation,
+                        sense_input_win::monotonic_now_ns(),
+                    );
                 }
                 if ui.button("Reset Counters").clicked() {
-                    reset_counters(&mut live_input, &mut buffers);
-                    session.status_message = Some(
-                        "Live counters reset; in-memory telemetry buffers cleared for this attempt."
-                            .into(),
-                    );
+                    session.status_message =
+                        match reset_counters(&mut live_input, &mut buffers, &integrity) {
+                            Ok(()) => Some(
+                                "Live counters, telemetry buffers, and integrity reset for this attempt."
+                                    .into(),
+                            ),
+                            Err(error) => Some(format!("Reset counters failed: {error}")),
+                        };
                 }
             });
             ui.horizontal(|ui| {

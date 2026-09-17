@@ -27,6 +27,7 @@ pub struct ValidationSession {
     pub active_session_id: Option<String>,
     pub last_result: Option<ValidationResult>,
     pub status_message: Option<String>,
+    pub raw_input_read_failures_at_start: u64,
 }
 
 pub fn next_session_id(date: &str, seq: u32) -> String {
@@ -124,12 +125,8 @@ pub fn start_validation(
     db.upsert_configuration(&configuration)?;
     db.insert_session_start(&record)?;
 
-    integrity
-        .0
-        .lock()
-        .map_err(|_| "input integrity tracker lock is poisoned".to_string())?
-        .reset();
-    reset_counters(live, buffers);
+    reset_counters(live, buffers, integrity)?;
+    session.raw_input_read_failures_at_start = sense_input_win::raw_input_read_failures();
     session.active_session_id = Some(session_id.clone());
     session.last_result = None;
     session.status_message = Some(format!("Validation running: {session_id}"));
@@ -157,12 +154,15 @@ pub fn end_validation(
         .lock()
         .map_err(|_| "input integrity tracker lock is poisoned".to_string())?
         .report();
+    let integrity_report = integrity_report_with_raw_input_failures(
+        integrity_report,
+        session.raw_input_read_failures_at_start,
+        sense_input_win::raw_input_read_failures(),
+    );
     let result = validation_result(sensitivity, live.net_dx, live.abs_dx, integrity_report);
     let db = open_database()?;
 
-    db.flush_buffers(session_id, &buffers.0)?;
-    db.insert_validation_result(session_id, &result)?;
-    db.end_session(session_id, unix_time_ms()?)?;
+    db.complete_validation(session_id, &buffers.0, &result, unix_time_ms()?)?;
 
     let completed_session_id = session_id.to_string();
     session.active_session_id = None;
@@ -174,13 +174,36 @@ pub fn end_validation(
 
 /// Zeros live counters and clears in-memory telemetry buffers for the current attempt.
 /// Does not delete rows already persisted to SQLite.
-pub fn reset_counters(live: &mut LiveInputStats, buffers: &mut TelemetryBuffers) {
+pub fn reset_counters(
+    live: &mut LiveInputStats,
+    buffers: &mut TelemetryBuffers,
+    integrity: &InputIntegrityTracker,
+) -> Result<(), String> {
     live.net_dx = 0;
     live.net_dy = 0;
     live.abs_dx = 0;
     live.total_yaw_delta_deg = 0.0;
     live.samples_this_frame = 0;
     buffers.0.clear();
+    integrity
+        .0
+        .lock()
+        .map_err(|_| "input integrity tracker lock is poisoned".to_string())?
+        .reset();
+    Ok(())
+}
+
+fn integrity_report_with_raw_input_failures(
+    mut report: InputIntegrityReport,
+    failures_at_start: u64,
+    failures_at_end: u64,
+) -> InputIntegrityReport {
+    // A failed WM_INPUT read creates a missing input sample, so fold the
+    // session-scoped failure delta into sequence gaps to mark the pipeline suspect.
+    report.sequence_gaps = report
+        .sequence_gaps
+        .saturating_add(failures_at_end.saturating_sub(failures_at_start));
+    report
 }
 
 fn open_database() -> Result<TelemetryDb, String> {
@@ -261,9 +284,17 @@ fn utc_date_from_unix_ms(unix_ms: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use sense_types::InputIntegrityReport;
+    use sense_input_win::IntegrityTracker;
+    use sense_types::{InputIntegrityReport, MouseSample};
 
-    use super::{next_config_id, next_session_id, utc_date_from_unix_ms, validation_result};
+    use crate::{
+        camera_ctrl::LiveInputStats, config::TelemetryBuffers, input_plugin::InputIntegrityTracker,
+    };
+
+    use super::{
+        integrity_report_with_raw_input_failures, next_config_id, next_session_id, reset_counters,
+        utc_date_from_unix_ms, validation_result,
+    };
 
     #[test]
     fn ids_are_stable_and_zero_padded() {
@@ -301,5 +332,35 @@ mod tests {
     fn utc_date_is_derived_without_locale() {
         assert_eq!(utc_date_from_unix_ms(0), "19700101");
         assert_eq!(utc_date_from_unix_ms(1_788_998_400_000), "20260910");
+    }
+
+    #[test]
+    fn reset_counters_also_resets_input_integrity() {
+        let integrity = InputIntegrityTracker::default();
+        integrity.0.lock().unwrap().observe(&MouseSample {
+            timestamp_ns: 1,
+            dx: 1,
+            dy: 0,
+            buttons: 0,
+            sequence_number: 1,
+        });
+        let mut live = LiveInputStats::default();
+        let mut buffers = TelemetryBuffers::default();
+
+        reset_counters(&mut live, &mut buffers, &integrity).unwrap();
+
+        assert_eq!(
+            integrity.0.lock().unwrap().report(),
+            IntegrityTracker::default().report()
+        );
+    }
+
+    #[test]
+    fn raw_input_read_failures_mark_pipeline_suspect() {
+        let report =
+            integrity_report_with_raw_input_failures(IntegrityTracker::default().report(), 7, 9);
+
+        assert_eq!(report.sequence_gaps, 2);
+        assert!(report.is_pipeline_suspect());
     }
 }

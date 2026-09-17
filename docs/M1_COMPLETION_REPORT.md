@@ -97,6 +97,7 @@ Implemented in `src/fov.rs`; updated on window resize via `maintain_horizontal_f
 
 - Component `YawPitch { yaw_deg, pitch_deg }` on `Camera3d`.
 - Yaw updated per drained sample: `yaw_deg += yaw_delta_deg(processed_dx, sensitivity)`.
+- Reset Camera records an `InputCameraSample` while validation is running; sequence `0` is reserved for this synthetic reset sample because raw mouse sequences start at `1`.
 - Pitch frozen at default (0°); vertical mouse input recorded but does not rotate camera.
 - Transform applied via `Quat::from_rotation_y(-yaw_deg)`.
 - Simple scene: floor plane, placeholder cube, egui crosshair overlay.
@@ -108,8 +109,9 @@ Implemented in `src/fov.rs`; updated on window resize via `maintain_horizontal_f
 
 1. While `ValidationState::Running`: each drained sample pushes to in-memory `SessionBuffers` (mouse + input camera); each frame pushes `FrameSample`.
 2. Net counters (`net_dx`, `abs_dx`, etc.) accumulate only during running state.
-3. On **End Validation**: single transaction flush of all buffers + insert `validation_results` + update session end time.
-4. On **Reset Counters**: zero live counters and clear in-memory buffers (no SQLite delete).
+3. On **End Validation**: `TelemetryDb::complete_validation` uses one transaction to flush all buffers, insert `validation_results`, and update the session end time.
+4. On **Reset Counters**: zero live counters, clear in-memory buffers, and reset `IntegrityTracker` (no SQLite delete).
+5. Raw-input read failures are baselined at Start Validation. The session delta is added to `sequence_gaps` at End Validation because each failed `WM_INPUT` read represents a missing input sample; any delta therefore marks the pipeline suspect without changing the schema.
 
 Database path: **`data/sense_maxer.db`**.
 
