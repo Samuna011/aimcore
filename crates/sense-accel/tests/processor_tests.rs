@@ -11,14 +11,38 @@ fn no_acceleration_is_identity() {
 
 #[test]
 fn factory_accepts_none_rejects_unknown() {
-    assert!(create_processor("none").is_ok());
-    assert!(create_processor("raw_accel").is_err());
+    assert!(create_processor("none", 0.0, 1.0).is_ok());
+    assert!(create_processor("raw_accel", 0.0, 1.0).is_err());
+}
+
+#[test]
+fn factory_rawaccel_linear_guide_process() {
+    let mut p = create_processor("rawaccel_linear", 0.01, 0.5).unwrap();
+    assert_eq!(p.id(), "rawaccel_linear");
+    assert_eq!(p.version(), "1.0.0");
+    let (ox, oy) = p.process(30.0, 40.0, 0.001);
+    assert!((ox - 22.5).abs() < 1e-9);
+    assert!((oy - 30.0).abs() < 1e-9);
+}
+
+#[test]
+fn factory_none_ignores_accel_params() {
+    let mut p = create_processor("none", 0.01, 0.5).unwrap();
+    assert_eq!(p.process(3.0, -2.0, 0.001), (3.0, -2.0));
+}
+
+#[test]
+fn factory_still_rejects_unknown() {
+    assert!(create_processor("raw_accel", 0.0, 1.0).is_err());
 }
 
 #[test]
 fn dt_s_from_consecutive_raw_timestamps() {
     assert_eq!(dt_s_from_timestamps(None, 1_000_000_000), 0.0);
-    assert_eq!(dt_s_from_timestamps(Some(1_000_000_000), 1_004_000_000), 0.004);
+    assert_eq!(
+        dt_s_from_timestamps(Some(1_000_000_000), 1_004_000_000),
+        0.004
+    );
     // Must not use render-frame semantics — only timestamp math.
 }
 

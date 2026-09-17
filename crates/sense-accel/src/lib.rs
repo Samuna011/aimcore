@@ -27,9 +27,44 @@ impl InputProcessor for NoAcceleration {
     }
 }
 
-pub fn create_processor(id: &str) -> Result<Box<dyn InputProcessor>, String> {
+pub struct RawAccelLinear {
+    pub acceleration: f64,
+    pub sensitivity_multiplier: f64,
+}
+
+impl InputProcessor for RawAccelLinear {
+    fn id(&self) -> &'static str {
+        "rawaccel_linear"
+    }
+
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+
+    fn config_json(&self) -> String {
+        format!(
+            "{{\"acceleration\":{},\"sensitivity_multiplier\":{}}}",
+            self.acceleration, self.sensitivity_multiplier
+        )
+    }
+
+    fn process(&mut self, dx: f64, dy: f64, dt_s: f64) -> (f64, f64) {
+        let e = eval_rawaccel_linear(dx, dy, dt_s, self.acceleration, self.sensitivity_multiplier);
+        (e.processed_dx, e.processed_dy)
+    }
+}
+
+pub fn create_processor(
+    id: &str,
+    acceleration: f64,
+    sensitivity_multiplier: f64,
+) -> Result<Box<dyn InputProcessor>, String> {
     match id {
         "none" => Ok(Box::new(NoAcceleration)),
+        "rawaccel_linear" => Ok(Box::new(RawAccelLinear {
+            acceleration,
+            sensitivity_multiplier,
+        })),
         _ => Err(format!("unknown processor id: {id}")),
     }
 }

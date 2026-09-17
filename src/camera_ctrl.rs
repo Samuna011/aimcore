@@ -31,7 +31,7 @@ pub struct ActiveInputProcessor {
 impl Default for ActiveInputProcessor {
     fn default() -> Self {
         Self {
-            processor: create_processor("none").expect("built-in processor must exist"),
+            processor: create_processor("none", 0.0, 1.0).expect("built-in processor must exist"),
         }
     }
 }

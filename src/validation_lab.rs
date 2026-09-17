@@ -137,7 +137,8 @@ pub fn draw_hud(
                 ));
             } else {
                 ui.monospace(format!("PROCESSOR: {}", settings.processor_id));
-                let version = sense_accel::create_processor(&settings.processor_id)
+                let version =
+                    sense_accel::create_processor(&settings.processor_id, 0.01, 1.0)
                     .map(|processor| processor.version().to_string())
                     .unwrap_or_else(|_| "?".into());
                 ui.monospace(format!("PROCESSOR VERSION: {version}"));
