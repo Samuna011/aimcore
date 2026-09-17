@@ -1,5 +1,9 @@
 //! Input processor trait, factory, and QPC-derived inter-sample timing.
 
+mod classic_linear;
+
+pub use classic_linear::*;
+
 pub trait InputProcessor: Send {
     fn id(&self) -> &'static str;
     fn version(&self) -> &'static str;
