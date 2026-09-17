@@ -28,6 +28,40 @@ pub fn apply_pitch_delta(pitch_deg: f64, processed_dy: f64, sensitivity: f64) ->
     clamp_pitch_deg(pitch_deg + pitch_delta_deg(processed_dy, sensitivity))
 }
 
+/// Analytic ray–sphere test for STATIC_CLICK (origin + dir, any length dir).
+/// Returns true if there is an intersection with parameter `t >= 0`.
+pub fn ray_sphere_hit(
+    origin: [f64; 3],
+    dir: [f64; 3],
+    center: [f64; 3],
+    radius: f64,
+) -> bool {
+    if radius < 0.0 || !radius.is_finite() {
+        return false;
+    }
+    let dlen = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+    if dlen <= f64::EPSILON {
+        return false;
+    }
+    let dx = dir[0] / dlen;
+    let dy = dir[1] / dlen;
+    let dz = dir[2] / dlen;
+    let ox = origin[0] - center[0];
+    let oy = origin[1] - center[1];
+    let oz = origin[2] - center[2];
+    // |o + t d|^2 = r^2  =>  t^2 + 2(o·d)t + (o·o - r^2) = 0
+    let b = ox * dx + oy * dy + oz * dz;
+    let c = ox * ox + oy * oy + oz * oz - radius * radius;
+    let disc = b * b - c;
+    if disc < 0.0 {
+        return false;
+    }
+    let sqrt_disc = disc.sqrt();
+    let t0 = -b - sqrt_disc;
+    let t1 = -b + sqrt_disc;
+    t0 >= 0.0 || t1 >= 0.0
+}
+
 pub fn edpi(dpi: f64, sensitivity: f64) -> f64 {
     dpi * sensitivity
 }

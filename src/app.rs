@@ -7,6 +7,7 @@ use bevy::{
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
+    aim_trial::{spawn_aim_target, sync_aim_target_visibility, AimTrial},
     camera_ctrl::{
         apply_yaw_transform, drain_mouse_to_camera, ActiveInputProcessor, LiveInputStats,
         ProcessorTimingState,
@@ -30,6 +31,7 @@ pub fn run() {
         .init_resource::<LiveFrameStats>()
         .init_resource::<ValidationSession>()
         .init_resource::<LookCapture>()
+        .init_resource::<AimTrial>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
@@ -43,7 +45,7 @@ pub fn run() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_plugins(RawInputPlugin)
-        .add_systems(Startup, setup_scene)
+        .add_systems(Startup, (setup_scene, spawn_aim_target))
         .add_systems(
             Update,
             (
@@ -51,6 +53,7 @@ pub fn run() {
                 apply_cursor_capture,
                 drain_mouse_to_camera,
                 apply_yaw_transform,
+                sync_aim_target_visibility,
                 record_frame_telemetry,
             )
                 .chain(),

@@ -71,3 +71,38 @@ fn pitch_clamps_at_pm_89() {
     let p = apply_pitch_delta(88.0, 1_000_000.0, 1.0);
     assert_eq!(p, -89.0); // large +dy drives look-down to floor
 }
+
+#[test]
+fn ray_sphere_hit_through_center() {
+    assert!(ray_sphere_hit(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -5.0],
+        0.5
+    ));
+}
+
+#[test]
+fn ray_sphere_miss_beside() {
+    assert!(!ray_sphere_hit(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [2.0, 0.0, -5.0],
+        0.5
+    ));
+}
+
+#[test]
+fn ray_sphere_miss_behind_camera() {
+    assert!(!ray_sphere_hit(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, 5.0],
+        0.5
+    ));
+}
+
+#[test]
+fn ray_sphere_zero_dir_misses() {
+    assert!(!ray_sphere_hit([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0));
+}

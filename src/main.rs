@@ -1,4 +1,5 @@
 mod app;
+mod aim_trial;
 mod camera_ctrl;
 mod config;
 mod fov;

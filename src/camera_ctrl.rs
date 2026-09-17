@@ -3,6 +3,7 @@ use sense_accel::{create_processor, InputProcessor, RawAccelLinearConfig};
 use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
+    aim_trial::{left_button_down, AimPhase, AimTrial},
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
 };
@@ -67,6 +68,7 @@ pub fn drain_mouse_to_camera(
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
+    mut aim: ResMut<AimTrial>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
@@ -106,6 +108,30 @@ pub fn drain_mouse_to_camera(
             &mut live,
             accumulate_stats,
         );
+        if aim.phase == AimPhase::Armed && left_button_down(sample.buttons) {
+            let origin = [
+                crate::aim_trial::AIM_CAMERA_ORIGIN.x as f64,
+                crate::aim_trial::AIM_CAMERA_ORIGIN.y as f64,
+                crate::aim_trial::AIM_CAMERA_ORIGIN.z as f64,
+            ];
+            let dir = crate::aim_trial::look_direction_neg_z(camera.yaw_deg, camera.pitch_deg);
+            let center = [
+                crate::aim_trial::AIM_TARGET_CENTER.x as f64,
+                crate::aim_trial::AIM_TARGET_CENTER.y as f64,
+                crate::aim_trial::AIM_TARGET_CENTER.z as f64,
+            ];
+            let hit = sense_math::ray_sphere_hit(
+                origin,
+                dir,
+                center,
+                crate::aim_trial::AIM_TARGET_RADIUS as f64,
+            );
+            aim.last_hit = Some(hit);
+            aim.last_yaw_deg = camera.yaw_deg;
+            aim.last_pitch_deg = camera.pitch_deg;
+            aim.last_timestamp_ns = sample.timestamp_ns;
+            aim.phase = AimPhase::Idle;
+        }
         if accumulate_stats {
             buffers.0.processed.push(ProcessedMouseSample {
                 timestamp_ns: sample.timestamp_ns,

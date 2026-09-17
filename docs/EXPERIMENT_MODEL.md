@@ -163,7 +163,7 @@ See [VALORANT_INPUT_MODEL.md](./VALORANT_INPUT_MODEL.md) for yaw constant proven
 
 ## Out of Scope (M1 Experiments)
 
-- STATIC_CLICK / flick / tracking / target switching
+- Flick / tracking / target switching (STATIC_CLICK is M3 — see aim trial HUD)
 - Movement segmentation and flick phase classifier
 - Multi-experiment scheduling
 - User/device management tables

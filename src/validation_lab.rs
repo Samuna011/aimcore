@@ -4,6 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 use sense_accel::CapMode;
 
 use crate::{
+    aim_trial::{cancel_aim_trial, start_aim_trial, AimPhase, AimTrial},
     camera_ctrl::{
         reset_camera, ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch,
     },
@@ -25,6 +26,7 @@ pub fn draw_hud(
     integrity: Res<InputIntegrityTracker>,
     mut session: ResMut<ValidationSession>,
     look: Res<LookCapture>,
+    mut aim: ResMut<AimTrial>,
     processor_runtime: (
         NonSendMut<ActiveInputProcessor>,
         ResMut<ProcessorTimingState>,
@@ -43,11 +45,25 @@ pub fn draw_hud(
             }
         }
     }
+
+    let ctx = contexts.ctx_mut()?;
+    if look.enabled {
+        let rect = ctx.content_rect();
+        let c = rect.center();
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("aim_crosshair"),
+        ));
+        let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(230, 230, 230));
+        painter.line_segment([egui::pos2(c.x - 10.0, c.y), egui::pos2(c.x + 10.0, c.y)], stroke);
+        painter.line_segment([egui::pos2(c.x, c.y - 10.0), egui::pos2(c.x, c.y + 10.0)], stroke);
+    }
+
     egui::Window::new("VALORANT VALIDATION LAB")
         .anchor(egui::Align2::LEFT_TOP, [12.0, 12.0])
         .resizable(false)
         .collapsible(false)
-        .show(contexts.ctx_mut()?, |ui| {
+        .show(ctx, |ui| {
             ui.strong("UnverifiedPitchModel");
             ui.small("Same 0.07 as yaw; +dy look down; ±89°; UNCERTAIN");
             if look.enabled {
@@ -101,6 +117,7 @@ pub fn draw_hud(
                     .clicked();
 
                 if start_clicked {
+                    cancel_aim_trial(&mut aim);
                     if let Err(error) = start_validation(
                         &settings,
                         window.physical_width(),
@@ -131,6 +148,52 @@ pub fn draw_hud(
                     }
                 }
             });
+            ui.separator();
+            ui.strong("STATIC_CLICK (M3)");
+            ui.small("Fixed sphere; ray–sphere hit; raw LMB down in look mode; one shot.");
+            ui.horizontal(|ui| {
+                let can_start_aim =
+                    !validation.is_running() && aim.phase == AimPhase::Idle;
+                if ui
+                    .add_enabled(can_start_aim, egui::Button::new("Start Aim Trial"))
+                    .clicked()
+                {
+                    if start_aim_trial(&mut pose, &mut aim, *validation) {
+                        session.status_message =
+                            Some("Aim trial armed — look at the green sphere and LMB.".into());
+                    }
+                }
+                if ui
+                    .add_enabled(aim.phase == AimPhase::Armed, egui::Button::new("Cancel Aim"))
+                    .clicked()
+                {
+                    cancel_aim_trial(&mut aim);
+                }
+            });
+            ui.monospace(format!(
+                "AIM: {}",
+                match aim.phase {
+                    AimPhase::Idle => "Idle",
+                    AimPhase::Armed => "Armed",
+                }
+            ));
+            match aim.last_hit {
+                Some(true) => {
+                    ui.monospace(format!(
+                        "LAST AIM: HIT  (yaw {:.3}, pitch {:.3})",
+                        aim.last_yaw_deg, aim.last_pitch_deg
+                    ));
+                }
+                Some(false) => {
+                    ui.monospace(format!(
+                        "LAST AIM: MISS (yaw {:.3}, pitch {:.3})",
+                        aim.last_yaw_deg, aim.last_pitch_deg
+                    ));
+                }
+                None => {
+                    ui.monospace("LAST AIM: —");
+                }
+            }
             ui.monospace(format!(
                 "STATE: {}",
                 if validation.is_running() {
