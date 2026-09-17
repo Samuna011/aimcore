@@ -1,7 +1,7 @@
 # M3 — UnverifiedPitchModel (Hipfire Pitch Enable) — Design Spec
 
 **Date:** 2026-09-17  
-**Status:** Draft for user review  
+**Status:** Approved for implementation  
 **Depends on:** `docs/superpowers/specs/2026-09-17-valorant-pitch-research-findings.md`; M2/M2.x processor path  
 **Scope:** Enable hipfire pitch look using approved research assumptions; Approach 1 (minimal enable). **No** pitch validation experiment, invert toggle, or ADS.
 
