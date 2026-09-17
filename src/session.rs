@@ -129,8 +129,7 @@ pub fn start_validation(
         .lock()
         .map_err(|_| "input integrity tracker lock is poisoned".to_string())?
         .reset();
-    buffers.0.clear();
-    reset_counters(live);
+    reset_counters(live, buffers);
     session.active_session_id = Some(session_id.clone());
     session.last_result = None;
     session.status_message = Some(format!("Validation running: {session_id}"));
@@ -173,12 +172,15 @@ pub fn end_validation(
     Ok(())
 }
 
-pub fn reset_counters(live: &mut LiveInputStats) {
+/// Zeros live counters and clears in-memory telemetry buffers for the current attempt.
+/// Does not delete rows already persisted to SQLite.
+pub fn reset_counters(live: &mut LiveInputStats, buffers: &mut TelemetryBuffers) {
     live.net_dx = 0;
     live.net_dy = 0;
     live.abs_dx = 0;
     live.total_yaw_delta_deg = 0.0;
     live.samples_this_frame = 0;
+    buffers.0.clear();
 }
 
 fn open_database() -> Result<TelemetryDb, String> {

@@ -41,8 +41,11 @@ pub fn draw_hud(
                     pose.yaw_deg = 0.0;
                 }
                 if ui.button("Reset Counters").clicked() {
-                    reset_counters(&mut live_input);
-                    session.status_message = Some("Live counters reset.".into());
+                    reset_counters(&mut live_input, &mut buffers);
+                    session.status_message = Some(
+                        "Live counters reset; in-memory telemetry buffers cleared for this attempt."
+                            .into(),
+                    );
                 }
             });
             ui.horizontal(|ui| {
