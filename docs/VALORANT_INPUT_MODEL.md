@@ -1,7 +1,7 @@
-# VALORANT Input Model (M1)
+# VALORANT Input Model
 
 **Date:** 2026-09-17  
-**Scope:** Horizontal yaw only in M1. Pitch is telemetry-only; camera pitch rotation is disabled.
+**Scope:** Horizontal yaw (M1+) and hipfire pitch via **UnverifiedPitchModel** (M3). Validation Lab 360° remains yaw-centric.
 
 ---
 
@@ -152,9 +152,31 @@ Mathematical equivalence is the target; tuning until it “feels right” is for
 
 ---
 
-## Pitch (M1)
+## Pitch — UnverifiedPitchModel (M3)
 
-Vertical input (`raw_dy`) is recorded but does not rotate the camera. VALORANT pitch behavior is **unverified** in M1. No pitch formula is asserted as correct.
+Hipfire pitch is **enabled** behind an explicitly unverified model. Does **not** claim Riot-primary CONFIRMED pitch math.
+
+Convention in this codebase: **`+pitch_deg` means look up**.
+
+### Pitch delta (per processed sample)
+
+```
+pitch_delta_deg = -(processed_dy × sensitivity × 0.07)
+pitch_deg       = clamp(pitch_deg + pitch_delta_deg, -89.0, 89.0)
+```
+
+Positive mouse `ΔY` → look **down** (pitch decreases). Uses the same numeric `0.07` constant as yaw and **processed** `dy` from `InputProcessor`.
+
+| Item | Value | Confidence |
+|------|--------|------------|
+| Pitch scalar | Same `0.07` deg/count @ sens 1 as yaw | **UNCERTAIN** |
+| Direction | Positive `ΔY` → look down | **UNCERTAIN** |
+| Clamp | `[-89°, +89°]` | **UNCERTAIN** |
+| Input | Processed `dy` (not raw) | **DERIVED** (M2) |
+
+FOV/resolution must **not** change deg/count for pitch (same independence as yaw).
+
+No pitch validation experiment, invert-Y toggle, or ADS in this cycle.
 
 ---
 
@@ -163,3 +185,5 @@ Vertical input (`raw_dy`) is recorded but does not rotate the camera. VALORANT p
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — system layout and input path
 - [EXPERIMENT_MODEL.md](./EXPERIMENT_MODEL.md) — 360° validation using signed net counts
 - [TELEMETRY_SCHEMA.md](./TELEMETRY_SCHEMA.md) — where raw and derived values are stored
+- [superpowers/specs/2026-09-17-valorant-pitch-research-findings.md](./superpowers/specs/2026-09-17-valorant-pitch-research-findings.md) — research evidence and confidence labels
+- [superpowers/specs/2026-09-17-unverified-pitch-model-design.md](./superpowers/specs/2026-09-17-unverified-pitch-model-design.md) — M3 design spec

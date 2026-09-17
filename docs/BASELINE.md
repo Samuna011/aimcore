@@ -28,7 +28,7 @@ M1 does **not** claim measured mouse-to-photon latency for any present mode.
 | Timestamp | **QPC** → nanoseconds (monotonic) |
 | Queue | Timestamped lossless queue; drain **all** samples; never coalesce/discard for FPS |
 | Acceleration | **`NoAcceleration`** (identity `InputProcessor`) until M2+ replaces/extends processors |
-| Pitch | **Disabled** (`PITCH MODEL: UNVERIFIED`) |
+| Pitch | **Enabled** — UnverifiedPitchModel (same 0.07; +dy look down; ±89°; **UNCERTAIN**) |
 
 ## Angular / display model
 
@@ -50,7 +50,9 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 | Sensitivity | 0.09 |
 | eDPI | 288 |
 
-Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch-disabled, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
+Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
+
+**Experiment version:** `0.5.0` (UnverifiedPitchModel enabled).
 
 ## Research progression (locked order)
 

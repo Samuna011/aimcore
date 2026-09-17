@@ -178,15 +178,16 @@ A future `RenderCameraSample` must be a separate type and table. Do not alias or
 
 ---
 
-## Pitch Disabled in M1
+## UnverifiedPitchModel (M3 pitch)
 
-- `raw_dy` is recorded in telemetry unchanged.
-- Camera pitch is **not** updated from mouse input.
-- egui HUD shows explicitly:
-  - `PITCH MODEL: UNVERIFIED`
-  - `PITCH ROTATION: DISABLED`
+- `raw_dy` is recorded in telemetry unchanged; camera pitch uses **processed** `dy` from `InputProcessor`.
+- Pitch helpers live in `sense-math` (`pitch_delta_deg`, `clamp_pitch_deg`, `apply_pitch_delta`).
+- Camera transform: `rotation = yaw_quat × pitch_quat` (`+pitch_deg` = look up; positive `ΔY` → look down).
+- Pitch clamped to `[-89°, +89°]`. Same `0.07` deg/count @ sens 1 as yaw — **UNCERTAIN** provenance.
+- egui HUD: live `PITCH: …` plus label `UnverifiedPitchModel` (same 0.07; +dy look down; ±89°; UNCERTAIN).
+- Validation Lab 360° remains **yaw-only** for expected counts / error; pitch does not add a validation experiment in M3.
 
-When pitch is enabled later, it must sit behind a named abstraction (e.g. `UnverifiedPitchModel`). M1 does not pretend VALORANT vertical behavior is verified.
+Design: [superpowers/specs/2026-09-17-unverified-pitch-model-design.md](./superpowers/specs/2026-09-17-unverified-pitch-model-design.md). Research: [superpowers/specs/2026-09-17-valorant-pitch-research-findings.md](./superpowers/specs/2026-09-17-valorant-pitch-research-findings.md).
 
 ---
 

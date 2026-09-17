@@ -36,8 +36,8 @@ pub fn draw_hud(
         .resizable(false)
         .collapsible(false)
         .show(contexts.ctx_mut()?, |ui| {
-            ui.strong("PITCH MODEL: UNVERIFIED");
-            ui.colored_label(egui::Color32::YELLOW, "PITCH ROTATION: DISABLED");
+            ui.strong("UnverifiedPitchModel");
+            ui.small("Same 0.07 as yaw; +dy look down; ±89°; UNCERTAIN");
             if look.enabled {
                 ui.colored_label(
                     egui::Color32::LIGHT_GREEN,
@@ -308,7 +308,7 @@ pub fn draw_hud(
                 live_input.samples_this_frame
             ));
             ui.monospace(format!("YAW: {:.6} deg", pose.yaw_deg));
-            ui.monospace(format!("PITCH (FROZEN): {:.6} deg", pose.pitch_deg));
+            ui.monospace(format!("PITCH: {:.6} deg", pose.pitch_deg));
             ui.monospace(format!(
                 "TOTAL YAW DELTA: {:.6} deg",
                 live_input.total_yaw_delta_deg
