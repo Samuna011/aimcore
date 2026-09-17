@@ -1,7 +1,7 @@
 # M3 — STATIC_CLICK Controlled Aim Task — Design Spec
 
 **Date:** 2026-09-17  
-**Status:** Approved  
+**Status:** Approved — **manual pass** (2026-09-17): Start Aim → look → LMB HIT/MISS works.  
 **Depends on:** Baseline exp `0.5.2+` (UnverifiedPitchModel, uncapped present, `rawaccel_linear` optional)  
 **Goal:** First controlled aim task: one fixed target, one raw click, ray–sphere hit/miss — prove the loop before random/flick/tracking.
 

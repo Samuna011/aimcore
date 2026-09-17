@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.6.0` (STATIC_CLICK aim trial; VSync OFF; UnverifiedPitchModel; time clamp).
+**Experiment version:** `0.6.1` (STATIC_CLICK 5-hit front-cone timed run).
 
 ## Research progression (locked order)
 

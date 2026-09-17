@@ -4,7 +4,9 @@ use bevy_egui::{egui, EguiContexts};
 use sense_accel::CapMode;
 
 use crate::{
-    aim_trial::{cancel_aim_trial, start_aim_trial, AimPhase, AimTrial},
+    aim_trial::{
+        cancel_aim_trial, start_aim_trial, AimPhase, AimTrial, AIM_HITS_TO_FINISH,
+    },
     camera_ctrl::{
         reset_camera, ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch,
     },
@@ -150,7 +152,9 @@ pub fn draw_hud(
             });
             ui.separator();
             ui.strong("STATIC_CLICK (M3)");
-            ui.small("Fixed sphere; ray–sphere hit; raw LMB down in look mode; one shot.");
+            ui.small(
+                "5 hits in a front cone (±25° yaw, ±12° pitch). Hit destroys & respawns; miss keeps target. Score = time for 5 hits.",
+            );
             ui.horizontal(|ui| {
                 let can_start_aim =
                     !validation.is_running() && aim.phase == AimPhase::Idle;
@@ -158,9 +162,11 @@ pub fn draw_hud(
                     .add_enabled(can_start_aim, egui::Button::new("Start Aim Trial"))
                     .clicked()
                 {
-                    if start_aim_trial(&mut pose, &mut aim, *validation) {
-                        session.status_message =
-                            Some("Aim trial armed — look at the green sphere and LMB.".into());
+                    let now = sense_input_win::monotonic_now_ns();
+                    if start_aim_trial(&mut pose, &mut aim, *validation, now) {
+                        session.status_message = Some(format!(
+                            "Aim run armed — destroy {AIM_HITS_TO_FINISH} green spheres (LMB). Miss keeps the same target."
+                        ));
                     }
                 }
                 if ui
@@ -171,28 +177,35 @@ pub fn draw_hud(
                 }
             });
             ui.monospace(format!(
-                "AIM: {}",
+                "AIM: {}  HITS: {}/{}",
                 match aim.phase {
                     AimPhase::Idle => "Idle",
                     AimPhase::Armed => "Armed",
-                }
+                },
+                aim.hits,
+                AIM_HITS_TO_FINISH
             ));
             match aim.last_hit {
                 Some(true) => {
                     ui.monospace(format!(
-                        "LAST AIM: HIT  (yaw {:.3}, pitch {:.3})",
+                        "LAST SHOT: HIT  (yaw {:.3}, pitch {:.3})",
                         aim.last_yaw_deg, aim.last_pitch_deg
                     ));
                 }
                 Some(false) => {
                     ui.monospace(format!(
-                        "LAST AIM: MISS (yaw {:.3}, pitch {:.3})",
+                        "LAST SHOT: MISS (yaw {:.3}, pitch {:.3}) — same target",
                         aim.last_yaw_deg, aim.last_pitch_deg
                     ));
                 }
                 None => {
-                    ui.monospace("LAST AIM: —");
+                    ui.monospace("LAST SHOT: —");
                 }
+            }
+            if let Some(secs) = aim.score_secs {
+                ui.strong(format!(
+                    "RUN SCORE: {secs:.3} s  ({AIM_HITS_TO_FINISH} hits)"
+                ));
             }
             ui.monospace(format!(
                 "STATE: {}",
