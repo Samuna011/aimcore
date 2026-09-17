@@ -1,7 +1,8 @@
 use sense_math::{edpi, VALORANT_YAW_DEG_PER_COUNT_AT_SENS_1};
 use sense_types::{
     AccelerationConfig, ConfigurationRecord, DisplayConfig, FovAxis, InputCameraSample,
-    InputIntegrityReport, MouseSample, SensitivityConfig, SessionRecord, ValidationResult,
+    InputIntegrityReport, MouseSample, ProcessedMouseSample, SensitivityConfig, SessionRecord,
+    ValidationResult,
 };
 
 #[test]
@@ -17,6 +18,22 @@ fn mouse_sample_roundtrip() {
     let back: MouseSample = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.dx, 42);
     assert_eq!(back.sequence_number, 1);
+}
+
+#[test]
+fn processed_mouse_sample_roundtrip() {
+    let sample = ProcessedMouseSample {
+        timestamp_ns: 1_500_000,
+        sequence_number: 3,
+        processed_dx: 42.0,
+        processed_dy: -7.0,
+        processor_id: "none".into(),
+        processor_version: "1.0.0".into(),
+        processor_config_json: "{}".into(),
+    };
+    let json = serde_json::to_string(&sample).expect("serialize");
+    let back: ProcessedMouseSample = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, sample);
 }
 
 #[test]
@@ -77,6 +94,9 @@ fn configuration_and_session_records_roundtrip() {
         accel: AccelerationConfig {
             enabled: false,
             model: "none".into(),
+            processor_id: "none".into(),
+            processor_version: "1.0.0".into(),
+            processor_config_json: "{}".into(),
         },
         polling_rate_hz: Some(1000.0),
     };

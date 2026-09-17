@@ -108,6 +108,9 @@ pub fn start_validation(
         accel: AccelerationConfig {
             enabled: false,
             model: "none".into(),
+            processor_id: "none".into(),
+            processor_version: "1.0.0".into(),
+            processor_config_json: "{}".into(),
         },
         polling_rate_hz: None,
     };

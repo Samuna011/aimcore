@@ -11,6 +11,18 @@ pub struct MouseSample {
     pub sequence_number: u64,
 }
 
+/// Processed mouse delta after InputProcessor transform; pairs 1:1 with raw MouseSample.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProcessedMouseSample {
+    pub timestamp_ns: u64,
+    pub sequence_number: u64,
+    pub processed_dx: f64,
+    pub processed_dy: f64,
+    pub processor_id: String,
+    pub processor_version: String,
+    pub processor_config_json: String,
+}
+
 /// Camera state immediately after applying one raw mouse sample (not render-frame).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputCameraSample {
@@ -45,6 +57,9 @@ pub struct SensitivityConfig {
 pub struct AccelerationConfig {
     pub enabled: bool,
     pub model: String,
+    pub processor_id: String,
+    pub processor_version: String,
+    pub processor_config_json: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
