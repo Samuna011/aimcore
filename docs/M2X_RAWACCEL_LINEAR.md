@@ -157,7 +157,7 @@ bypassed_nonpositive_dt = false
   "gain": true,
   "input_offset": 0.0,
   "cap_mode": "out",
-  "cap_x": 0.0,
+  "cap_x": 2.0,
   "cap_y": 2.0
 }
 ```
@@ -173,7 +173,7 @@ These are **trainer** defaults (editable while Idle), **not** claimed as officia
 | `gain` | `true` | Primary path = Gain |
 | `input_offset` | `0.0` | |
 | `cap_mode` | `"out"` | `"out"` \| `"in"` \| `"io"` |
-| `cap_x` | `0.0` | Used by `in` / `io`; for `out` Gain path, effective `cap.x` is computed in ctor |
+| `cap_x` | `2.0` | Same default as Cap Y for HUD/`in`/`io`; for `out` Gain, effective knee is still computed in ctor from Cap Y + accel |
 | `cap_y` | `2.0` | Output ratio style (e.g. Output 2) |
 
 **Optional verification preset:** `gain: false`, inactive cap (non-positive `cap_y` for out) → Phase 1 Guide path; use `RawAccelLinearConfig::phase1_sensitivity(0.01, 0.5)` in tests.

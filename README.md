@@ -10,7 +10,7 @@ RAW MOUSE INPUT → INPUT PROCESSOR → SENSITIVITY MODEL → CAMERA YAW → NAT
 
 See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), M1 completion report, **M2 processor framework** (`docs/M2_PROCESSOR.md`), and **M2.x Raw Accel Linear** (`docs/M2X_RAWACCEL_LINEAR.md`).
 
-**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync **ON** / FPS capped to refresh, WM_INPUT, QPC, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable). Uncapped VSync-off was a temporary M1 verification only.
+**M1 status:** COMPLETE / STOPPED. Experimental baseline: VSync **OFF** / uncapped present (adopted exp `0.5.2` after latency feel A/B), WM_INPUT, QPC, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable.
 
 **M2 status:** COMPLETE. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`).
 

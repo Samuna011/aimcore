@@ -34,9 +34,9 @@ pub fn run() {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
                 resolution: WindowResolution::new(1280, 720),
-                // Baseline (post-M1): VSync ON — FPS capped to display refresh via presentation.
-                // Uncapped / AutoNoVsync was a temporary M1 verification condition only.
-                present_mode: PresentMode::AutoVsync,
+                // Adopted baseline (exp 0.5.2+): VSync OFF / uncapped — lower perceived aim latency.
+                // WM_INPUT path unchanged; do not use frame time for accel dt_s.
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
             ..default()

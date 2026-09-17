@@ -156,7 +156,7 @@ RAW INPUT → timestamped queue → InputProcessor → process every sample → 
 
 ### Presentation / VSync (locked baseline)
 
-- Window `present_mode = PresentMode::AutoVsync` (**VSync ON**; FPS capped to display refresh).
+- Window `present_mode = PresentMode::AutoNoVsync` (**VSync OFF**; FPS uncapped) — adopted after exp `0.5.2` latency feel A/B (was `AutoVsync` post-M1).
 - No separate application FPS limiter (refresh rate is the cap).
 - Run 3 temporarily used `AutoNoVsync` / uncapped only as an M1 verification condition; that is **not** the lasting baseline.
 - Render cadence remains independent of WM_INPUT sampling. Present mode does **not** imply measured mouse-to-photon latency.

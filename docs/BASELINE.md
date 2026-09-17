@@ -9,11 +9,11 @@ This is the default experimental condition for all subsequent milestones (M2+) u
 
 | Setting | Value |
 |---------|--------|
-| VSync | **ON** (`PresentMode::AutoVsync`) |
-| FPS | **Capped to display refresh** via VSync (no separate application FPS limiter) |
+| VSync | **OFF** (`PresentMode::AutoNoVsync`) |
+| FPS | **Uncapped** via present mode (no separate application FPS limiter) |
 | Frame telemetry | Records **actual** frame time / FPS |
 
-**History:** Run 3 temporarily used `AutoNoVsync` / uncapped FPS only to verify that presentation mode does not break the raw-input pipeline. That was **not** adopted as the lasting baseline. Do not switch back to uncapped / VSync-off unless the experimenter explicitly requests it.
+**History:** Post-M1 lasting default was VSync ON. M1 Run 3 used uncapped for integrity only. **2026-09-17 exp `0.5.2`:** experimenter A/B’d uncapped for perceived input lag — **adopted** (feels better). VSync ON remains available if an experiment explicitly snapshots it.
 
 VSync / refresh capping does **not** couple WM_INPUT sampling to render FPS. Input remains event-driven and queue-drained independently.
 
@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.5.0` (UnverifiedPitchModel enabled).
+**Experiment version:** `0.5.2` (VSync OFF / uncapped present adopted after latency feel A/B; UnverifiedPitchModel + time clamp retained).
 
 ## Research progression (locked order)
 

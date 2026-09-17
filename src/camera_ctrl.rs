@@ -22,6 +22,13 @@ pub struct LiveInputStats {
     pub abs_dx: u64,
     pub total_yaw_delta_deg: f64,
     pub samples_this_frame: usize,
+    pub last_raw_dt_ms: f64,
+    pub last_speed_dt_ms: f64,
+    pub last_input_speed: f64,
+    pub last_acceleration_scale: f64,
+    pub last_time_clamped: bool,
+    pub last_bypassed_dt: bool,
+    pub has_accel_debug: bool,
 }
 
 pub struct ActiveInputProcessor {
@@ -79,6 +86,17 @@ pub fn drain_mouse_to_camera(
             active_processor
                 .processor
                 .process(sample.dx as f64, sample.dy as f64, dt_s);
+        if let Some(e) = active_processor.processor.last_linear_eval() {
+            live.last_raw_dt_ms = e.raw_dt_ms;
+            live.last_speed_dt_ms = e.dt_ms;
+            live.last_input_speed = e.input_speed;
+            live.last_acceleration_scale = e.acceleration_scale;
+            live.last_time_clamped = e.time_clamped;
+            live.last_bypassed_dt = e.bypassed_nonpositive_dt;
+            live.has_accel_debug = true;
+        } else {
+            live.has_accel_debug = false;
+        }
         let camera_sample = apply_sample(
             &sample,
             processed_dx,

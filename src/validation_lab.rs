@@ -31,6 +31,18 @@ pub fn draw_hud(
     ),
 ) -> bevy::prelude::Result {
     let (mut active_processor, mut timing) = processor_runtime;
+    // Idle: keep live processor in sync with HUD settings so feel tests / SPEED DEBUG
+    // work without requiring Start Validation.
+    if !validation.is_running() {
+        let id_mismatch = active_processor.processor.id() != settings.processor_id.as_str();
+        if settings.is_changed() || id_mismatch {
+            if let Ok(processor) =
+                sense_accel::create_processor(&settings.processor_id, &settings.rawaccel_linear_config())
+            {
+                active_processor.processor = processor;
+            }
+        }
+    }
     egui::Window::new("VALORANT VALIDATION LAB")
         .anchor(egui::Align2::LEFT_TOP, [12.0, 12.0])
         .resizable(false)
@@ -217,7 +229,7 @@ pub fn draw_hud(
                                 .speed(0.1)
                                 .range(0.0..=10_000.0),
                         )
-                        .on_hover_text("Input cap; used by in and io modes.");
+                        .on_hover_text("Input cap; used by in and io. For out, stored for UI; effective knee is derived from Cap Y + accel.");
                     });
                     ui.horizontal(|ui| {
                         ui.label("Cap Y");
@@ -236,13 +248,51 @@ pub fn draw_hud(
                                 .range(0.0..=10_000.0),
                         );
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Poll rate Hz (speed dt floor)");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.polling_rate_hz)
+                                .speed(1)
+                                .range(0..=8000),
+                        )
+                        .on_hover_text(
+                            "EXPLICIT trainer: speed dt_ms floor = 1000/Hz when > 0. 0 uses RA default min 0.0625 ms.",
+                        );
+                    });
                     ui.small(
-                        "Trainer defaults: Gain on, Output cap 2, acceleration 0.007, multiplier 1.",
+                        "Trainer defaults: Gain on, Output cap, Cap X/Y = 2, acceleration 0.007, multiplier 1, poll floor 1000 Hz.",
+                    );
+                    ui.small(
+                        "Poll-period floor compensates user-mode WM_INPUT timestamps — not Device DPI.",
                     );
                 }
             });
             if validation.is_running() {
                 ui.small("Processor locked while validation is running (snapshotted at Start).");
+            }
+            if live_input.has_accel_debug {
+                ui.separator();
+                ui.strong("SPEED DEBUG (last sample)");
+                ui.monospace(format!(
+                    "DT_MS raw {:.4} → speed {:.4}{}",
+                    live_input.last_raw_dt_ms,
+                    live_input.last_speed_dt_ms,
+                    if live_input.last_time_clamped {
+                        " (CLAMPED)"
+                    } else if live_input.last_bypassed_dt {
+                        " (BYPASS)"
+                    } else {
+                        ""
+                    }
+                ));
+                ui.monospace(format!(
+                    "INPUT SPEED: {:.4} counts/ms",
+                    live_input.last_input_speed
+                ));
+                ui.monospace(format!(
+                    "ACCEL SCALE: {:.6}",
+                    live_input.last_acceleration_scale
+                ));
             }
             if let Some(message) = &session.status_message {
                 ui.label(message);
@@ -315,7 +365,7 @@ pub fn draw_hud(
             ));
             ui.separator();
             ui.monospace(format!("PRESENT MODE: {:?}", window.present_mode));
-            ui.small("VSync: ON (PresentMode::AutoVsync). FPS capped to display refresh. Input remains WM_INPUT-driven, not frame-locked.");
+            ui.small("VSync: OFF (PresentMode::AutoNoVsync). FPS uncapped (adopted exp 0.5.2). Input remains WM_INPUT-driven, not frame-locked.");
             ui.monospace(format!("FPS: {:.1}", live_frame.fps));
             ui.monospace(format!(
                 "FRAME TIME: {:.3} ms",

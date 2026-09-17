@@ -157,7 +157,7 @@ Official Gain/cap math runs **only** when `dt_ms > 0`.
   "gain": true,
   "input_offset": 0.0,
   "cap_mode": "out",
-  "cap_x": 0.0,
+  "cap_x": 2.0,
   "cap_y": 2.0
 }
 ```
@@ -169,7 +169,7 @@ Official Gain/cap math runs **only** when `dt_ms > 0`.
 | `gain` | `true` | Primary path = Gain |
 | `input_offset` | `0.0` | |
 | `cap_mode` | `"out"` | `"out"` \| `"in"` \| `"io"` |
-| `cap_x` | `0.0` | Used by `in` / `io`; for `out` Gain path, effective `cap.x` is computed in ctor |
+| `cap_x` | `2.0` | Same default as Cap Y; for `out` Gain, effective knee still from Cap Y + accel |
 | `cap_y` | `2.0` | Output ratio style (e.g. Output 2) |
 
 **Optional verification preset:** `gain: false`, inactive cap (per source: non-positive `cap_y` for out) → Phase 1 Guide path must still pass unit tests.

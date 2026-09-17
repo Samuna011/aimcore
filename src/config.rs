@@ -30,6 +30,8 @@ pub struct ExperimentSettings {
     pub cap_mode: CapMode,
     pub cap_x: f64,
     pub cap_y: f64,
+    /// EXPLICIT trainer poll-period floor for speed dt (0 = RA default min only).
+    pub polling_rate_hz: u32,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +73,7 @@ impl Default for ExperimentSettings {
             cap_mode: rawaccel.cap_mode,
             cap_x: rawaccel.cap_x,
             cap_y: rawaccel.cap_y,
+            polling_rate_hz: rawaccel.polling_rate_hz,
         }
     }
 }
@@ -95,6 +98,7 @@ impl ExperimentSettings {
             cap_mode: self.cap_mode,
             cap_x: self.cap_x,
             cap_y: self.cap_y,
+            polling_rate_hz: self.polling_rate_hz,
         }
     }
 }
@@ -124,8 +128,9 @@ mod tests {
         assert!(settings.gain);
         assert_eq!(settings.input_offset, 0.0);
         assert_eq!(settings.cap_mode, CapMode::Out);
-        assert_eq!(settings.cap_x, 0.0);
+        assert_eq!(settings.cap_x, 2.0);
         assert_eq!(settings.cap_y, 2.0);
+        assert_eq!(settings.polling_rate_hz, 1000);
     }
 
     #[test]
@@ -138,6 +143,7 @@ mod tests {
             cap_mode: CapMode::Io,
             cap_x: 4.0,
             cap_y: 2.5,
+            polling_rate_hz: 500,
             ..ExperimentSettings::default()
         };
 
@@ -151,6 +157,7 @@ mod tests {
                 cap_mode: CapMode::Io,
                 cap_x: 4.0,
                 cap_y: 2.5,
+                polling_rate_hz: 500,
             }
         );
     }
