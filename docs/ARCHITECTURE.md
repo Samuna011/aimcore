@@ -1,7 +1,8 @@
 # Architecture — VALORANT Input Validation Lab (M1)
 
 **Date:** 2026-09-17  
-**Scope:** Milestone 1 only — Validation Lab; no aim tasks.
+**Scope:** Milestone 1 only — Validation Lab; no aim tasks.  
+**Stack:** Bevy `0.19.1`, `bevy_egui` `0.42.0`, Windows only.
 
 ---
 
@@ -117,19 +118,15 @@ Mouse input is captured via Windows `WM_INPUT` raw relative movement.
 
 ---
 
-## Bevy 0.19 HWND Hook
+## Bevy 0.19 HWND Hook (`SetWindowSubclass`)
 
-After winit creates the primary window, a Bevy `Startup` exclusive system reads
-the Win32 `HWND` from the window entity's `RawHandleWrapper`. It registers that
-handle with `sense_input_win::register_raw_mouse`, then installs a
-`SetWindowSubclass` callback on the same window thread.
+After winit creates the primary window, a Bevy `Startup` exclusive system (`install_raw_input_hook` in `src/input_plugin.rs`) reads the Win32 `HWND` from the window entity's `RawHandleWrapper`. It:
 
-The subclass handles each `WM_INPUT` by calling
-`sense_input_win::handle_wm_input` with the shared `MouseQueue`, then always
-forwards the message to `DefSubclassProc` so winit's normal processing remains
-intact. Hook state is owned by the subclass reference data and released on
-`WM_NCDESTROY`. The Bevy `Update` drain consumes every queued sample in order;
-no Bevy cursor or `MouseMotion` event participates in the experimental stream.
+1. Calls `sense_input_win::register_raw_mouse` to register for raw mouse `WM_INPUT`.
+2. Installs a `SetWindowSubclass` callback (subclass ID `0x5345_4E53_455F_5241`) on the same window thread.
+3. Stores `HookState` (shared `Arc<MouseQueue>` + `Arc<Mutex<IntegrityTracker>>`) as subclass reference data.
+
+The subclass proc handles each `WM_INPUT` by calling `sense_input_win::handle_wm_input`, then **always** forwards to `DefSubclassProc` so winit's normal processing remains intact. Hook state is released on `WM_NCDESTROY`. The Bevy `Update` drain consumes every queued sample in order; no Bevy cursor or `MouseMotion` event participates in the experimental stream.
 
 ---
 
@@ -167,7 +164,7 @@ RAW INPUT → timestamped queue → process every sample → camera yaw + teleme
 
 A future `RenderCameraSample` must be a separate type and table. Do not alias or conflate render-frame pose with input-derived pose.
 
-**M1 cadence:** one `InputCameraSample` row per drained mouse sample that updates yaw, plus rows on camera/counter reset.
+**M1 cadence:** one `InputCameraSample` row per drained mouse sample while `ValidationState::Running`. Samples are buffered in memory during the session and flushed to SQLite on End Validation. Camera yaw still updates live outside a session; only telemetry persistence and net counters are gated on validation state.
 
 ---
 
@@ -185,7 +182,7 @@ When pitch is enabled later, it must sit behind a named abstraction (e.g. `Unver
 
 ## SQLite Batching
 
-Telemetry persists to SQLite under `data/` (gitignored).
+Telemetry persists to SQLite at `data/sense_maxer.db` (directory `data/` is gitignored).
 
 **Performance rules:**
 

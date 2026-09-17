@@ -1,8 +1,8 @@
 # Telemetry Schema (M1)
 
 **Date:** 2026-09-17  
-**Storage:** SQLite under `data/` (gitignored)  
-**Write pattern:** batched inserts inside transactions; never one transaction per mouse event.
+**Database path:** `data/sense_maxer.db` (gitignored)  
+**Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
 ---
 
@@ -18,34 +18,34 @@ Rules:
 - Never mutate raw samples after capture.
 - Derived metrics are written to separate columns/tables.
 - When acceleration is added later, store both raw and processed counts; M1 processed equals raw under `NoAcceleration`.
+- Mouse, input-camera, and frame samples are buffered only while a validation session is running.
 
 ---
 
 ## M1 Tables
 
+Schema is created by `TelemetryDb::migrate()` in `crates/sense-telemetry/src/db.rs`.
+
 ### `configurations`
 
-Snapshot of experimental settings. Referenced by sessions; do not rely on “current settings” to reconstruct history.
+Snapshot of experimental settings at session start. Full struct also stored as JSON in `snapshot_json`.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
-| `config_id` | TEXT PK | e.g. `config_NNNNNN` |
-| `created_at` | TEXT | wall-clock ISO8601 |
-| `app_version` | TEXT | binary version |
-| `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | e.g. `0.1.0` |
-| `dpi` | INTEGER | counts/inch |
+| `id` | TEXT PK | e.g. `config_000001` |
+| `dpi` | REAL | counts/inch |
 | `sensitivity` | REAL | game sensitivity |
 | `edpi` | REAL | derived: DPI × sensitivity |
+| `yaw_deg_per_count_at_sens_1` | REAL | 0.07 (UNCERTAIN provenance) |
 | `fov_axis` | TEXT | `Horizontal` in M1 |
 | `fov_degrees` | REAL | degrees |
-| `resolution_w` | INTEGER | pixels |
-| `resolution_h` | INTEGER | pixels |
-| `refresh_hz` | REAL | Hz, if detected |
-| `accel_state` | TEXT | e.g. `NoAcceleration` |
-| `polling_rate_hz` | INTEGER | optional, if known |
-| `random_seed` | INTEGER | stored even if unused in M1 |
-| `yaw_constant` | REAL | 0.07 (UNCERTAIN provenance) |
+| `width` | INTEGER | pixels |
+| `height` | INTEGER | pixels |
+| `refresh_hz` | REAL | Hz (0 if undetected) |
+| `acceleration_enabled` | INTEGER | 0/1 |
+| `acceleration_model` | TEXT | e.g. `none` |
+| `polling_rate_hz` | REAL | optional |
+| `snapshot_json` | TEXT | full `ConfigurationRecord` JSON |
 
 ---
 
@@ -55,29 +55,29 @@ One row per Validation Lab session (Start → End).
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
-| `session_id` | TEXT PK | e.g. `session_YYYYMMDD_NNNNNN` |
-| `config_id` | TEXT FK | → `configurations` |
-| `started_at` | TEXT | wall clock |
-| `ended_at` | TEXT | wall clock, nullable until End |
-| `notes` | TEXT | optional |
+| `id` | TEXT PK | e.g. `session_20260917_000001` |
+| `configuration_id` | TEXT FK | → `configurations.id` |
+| `app_version` | TEXT | binary version (`0.1.0`) |
+| `experiment_id` | TEXT | `validation_lab` |
+| `experiment_version` | TEXT | `0.1.0` |
+| `random_seed` | INTEGER | stored even if unused in M1 |
+| `start_unix_ms` | INTEGER | wall clock (Unix ms) |
+| `end_unix_ms` | INTEGER | wall clock, nullable until End |
 
 ---
 
 ### `raw_mouse_events`
 
-Immutable raw input stream.
+Immutable raw input stream. Composite primary key per session.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
-| `id` | INTEGER PK | autoincrement |
-| `session_id` | TEXT FK | → `sessions` |
-| `timestamp_ns` | INTEGER | monotonic (QPC family) |
+| `session_id` | TEXT FK | → `sessions.id` |
 | `sequence_number` | INTEGER | monotonic order per session |
+| `timestamp_ns` | INTEGER | monotonic (QPC family) |
 | `dx` | INTEGER | mouse counts |
 | `dy` | INTEGER | mouse counts |
 | `buttons` | INTEGER | button bitmask |
-
-Preserve additional platform fields if available in later schema revisions.
 
 ---
 
@@ -87,15 +87,13 @@ Preserve additional platform fields if available in later schema revisions.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
-| `id` | INTEGER PK | autoincrement |
-| `session_id` | TEXT FK | → `sessions` |
+| `session_id` | TEXT FK | → `sessions.id` |
+| `sequence_number` | INTEGER | mouse sample sequence |
 | `timestamp_ns` | INTEGER | same clock family as applied mouse sample |
-| `sequence_number` | INTEGER | mouse sample sequence (when applicable) |
 | `yaw_deg` | REAL | degrees |
 | `pitch_deg` | REAL | degrees (unchanged by mouse in M1) |
-| `event_kind` | TEXT | e.g. `mouse_sample`, `camera_reset`, `counter_reset` |
 
-**Cadence:** one row per drained mouse sample that updates yaw, plus rows on camera/counter reset.
+**Cadence:** one row per drained mouse sample while validation is running (same samples as `raw_mouse_events`).
 
 **Future:** `RenderCameraSample` (pose at render submit/present) will be a separate type/table — **not M1**.
 
@@ -103,15 +101,15 @@ Preserve additional platform fields if available in later schema revisions.
 
 ### `frame_samples`
 
-Render-path timing; separate from input cadence.
+Render-path timing; separate from input cadence. Recorded only during validation sessions.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
 | `id` | INTEGER PK | autoincrement |
-| `session_id` | TEXT FK | → `sessions` |
-| `timestamp_ns` | INTEGER | monotonic |
-| `frame_index` | INTEGER | render frame counter |
-| `delta_ms` | REAL | optional frame delta |
+| `session_id` | TEXT FK | → `sessions.id` |
+| `timestamp_ns` | INTEGER | monotonic (QPC at frame record) |
+| `frame_time_s` | REAL | seconds |
+| `fps` | REAL | derived `1 / frame_time_s` |
 
 Do not use frame index or FPS as a substitute for input timestamps.
 
@@ -119,35 +117,23 @@ Do not use frame index or FPS as a substitute for input timestamps.
 
 ### `validation_results`
 
-Persisted outcome of End Validation, including math discrepancy and input-integrity report.
+Persisted outcome of End Validation, including math discrepancy and input-integrity report. One row per session.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
-| `id` | INTEGER PK | autoincrement |
-| `session_id` | TEXT FK | → `sessions` unique per validation |
-| `ended_at` | TEXT | wall clock |
-
-**Math fields (derived via `sense-math`):**
-
-| Column | Type | Unit / notes |
-|--------|------|--------------|
-| `expected_counts` | REAL | 360 / (sensitivity × 0.07) |
-| `observed_counts` | REAL | **signed** Σ `raw_dx` (net horizontal counts) |
-| `absolute_path_counts` | REAL | Σ \|raw_dx\| — telemetry only, **not** used for validation math |
+| `session_id` | TEXT PK | → `sessions.id` |
+| `expected_counts` | REAL | `counts_per_360(sensitivity)` |
+| `observed_net_counts` | REAL | **signed** Σ `raw_dx` (net horizontal counts) |
+| `observed_abs_path_counts` | REAL | Σ \|raw_dx\| — telemetry only, **not** used for validation math |
 | `expected_degrees` | REAL | 360 |
-| `observed_degrees` | REAL | derived from signed net counts |
-| `difference_degrees` | REAL | observed − expected |
-| `error_percent` | REAL | relative error |
-
-**Integrity fields (pipeline health):**
-
-| Column | Type | Unit / notes |
-|--------|------|--------------|
+| `observed_degrees` | REAL | `yaw_delta_deg(observed_net_counts, sensitivity)` |
+| `count_difference` | REAL | observed_net − expected counts |
+| `error_percent` | REAL | `(count_difference / expected_counts) × 100` |
 | `samples_received` | INTEGER | total raw samples in validation window |
 | `sequence_gaps` | INTEGER | missing sequence numbers |
 | `duplicate_sequences` | INTEGER | repeated sequence numbers |
 | `out_of_order_samples` | INTEGER | sequence regressions |
-| `timestamp_regressions` | INTEGER | timestamp_ns going backward |
+| `timestamp_regressions` | INTEGER | `timestamp_ns` going backward |
 | `pipeline_suspect` | INTEGER | 0/1 — **1 if any integrity counter > 0** |
 
 If `pipeline_suspect = 1`, treat the run as **pipeline-suspect**: still show math discrepancy; do not auto-correct.

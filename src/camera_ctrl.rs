@@ -49,6 +49,7 @@ pub fn drain_mouse_to_camera(
     } else {
         time.delta_secs_f64() / samples.len() as f64
     };
+    let accumulate_stats = validation.is_running();
     for sample in samples {
         let (processed_dx, _) =
             processor
@@ -60,8 +61,9 @@ pub fn drain_mouse_to_camera(
             settings.sensitivity,
             &mut camera,
             &mut live,
+            accumulate_stats,
         );
-        if validation.is_running() {
+        if accumulate_stats {
             buffers.0.mouse.push(sample);
             buffers.0.input_camera.push(camera_sample);
         }
@@ -79,17 +81,20 @@ fn apply_sample(
     sensitivity: f64,
     pose: &mut YawPitch,
     live: &mut LiveInputStats,
+    accumulate_stats: bool,
 ) -> InputCameraSample {
     let yaw_delta_deg = sense_math::yaw_delta_deg(processed_dx, sensitivity);
     pose.yaw_deg += yaw_delta_deg;
     live.last_dx = sample.dx;
     live.last_dy = sample.dy;
-    live.net_dx = live.net_dx.saturating_add(i64::from(sample.dx));
-    live.net_dy = live.net_dy.saturating_add(i64::from(sample.dy));
-    live.abs_dx = live
-        .abs_dx
-        .saturating_add(u64::from(sample.dx.unsigned_abs()));
-    live.total_yaw_delta_deg += yaw_delta_deg;
+    if accumulate_stats {
+        live.net_dx = live.net_dx.saturating_add(i64::from(sample.dx));
+        live.net_dy = live.net_dy.saturating_add(i64::from(sample.dy));
+        live.abs_dx = live
+            .abs_dx
+            .saturating_add(u64::from(sample.dx.unsigned_abs()));
+        live.total_yaw_delta_deg += yaw_delta_deg;
+    }
     live.samples_this_frame += 1;
     InputCameraSample {
         timestamp_ns: sample.timestamp_ns,
@@ -117,7 +122,7 @@ mod tests {
             pitch_deg: 11.0,
         };
         let mut live = LiveInputStats::default();
-        apply_sample(&sample, 10.0, 0.5, &mut pose, &mut live);
+        apply_sample(&sample, 10.0, 0.5, &mut pose, &mut live, true);
         assert_eq!(pose.yaw_deg, 2.35);
         assert_eq!(pose.pitch_deg, 11.0);
         assert_eq!((live.net_dx, live.net_dy, live.abs_dx), (10, -4, 10));

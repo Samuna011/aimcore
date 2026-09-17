@@ -54,26 +54,30 @@ Do not rely on live application settings to reconstruct historical runs.
 
 1. **Start Validation**
    - Allocate `session_id` and `config_id`.
-   - Snapshot configuration + versions into `configurations` and `sessions`.
-   - Begin recording raw mouse events and input camera samples.
+   - Snapshot configuration + versions into SQLite (`data/sense_maxer.db`).
+   - Reset integrity tracker; zero live counters; clear in-memory telemetry buffers.
+   - Set `ValidationState::Running`.
 
-2. **Reset Camera** (optional, any time before/during)
-   - Set yaw to a known forward value (e.g. 0°).
+2. **Reset Camera** (optional, any time)
+   - Set yaw to 0° via HUD button.
    - Pitch remains frozen (M1).
-   - Emit `InputCameraSample` with `event_kind = camera_reset`.
+   - Does not affect counters or persisted rows.
 
-3. **Reset Counters** (optional)
-   - Zero horizontal/vertical count accumulators in HUD.
-   - Emit telemetry marker; does not end session.
+3. **Reset Counters** (optional, during or between attempts within a session)
+   - Zero net/abs count accumulators and total yaw delta in HUD.
+   - Clear in-memory telemetry buffers for the current attempt.
+   - Does **not** delete rows already persisted to SQLite; does not end session.
 
 4. **User rotation**
    - User performs **one continuous horizontal rotation in a single direction without reversing**.
-   - Each raw sample: drain queue → apply yaw via `sense-math` → record telemetry.
+   - Each raw sample: drain queue → apply yaw via `sense-math` → buffer telemetry (only while running).
+   - Net counters (`net_dx`, `net_dy`, `abs_dx`, `total_yaw_delta_deg`) accumulate only while `ValidationState::Running`.
 
 5. **End Validation**
    - Compute results using **the same `sense-math` functions as the live app**.
-   - Persist raw events, validation result, and integrity report.
-   - **Do not** auto-compensate for discrepancy.
+   - Flush buffered raw events, input camera samples, and frame samples; insert validation result; set session end time.
+   - Display results in egui; **do not** auto-compensate for discrepancy.
+   - Set `ValidationState::Idle`.
 
 ---
 
@@ -143,7 +147,7 @@ Report integrity counters in HUD and persist with `validation_results`.
 | Control | Effect |
 |---------|--------|
 | Reset Camera | Known forward yaw |
-| Reset Counters | Zero count accumulators |
+| Reset Counters | Zero count accumulators; clear in-memory telemetry buffers |
 | Start Validation | New session + config snapshot |
 | End Validation | Compute, persist, report |
 
