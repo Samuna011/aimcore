@@ -61,14 +61,32 @@ Input must remain event-driven and queue-drained independently of render FPS.
 ```
 WM_INPUT
   → QPC timestamp
-  → MouseSample { dx, dy, ... }          // IMMUTABLE raw
-  → InputProcessor::process(dx, dy, dt)
+  → MouseSample { dx, dy, timestamp_ns, ... }   // IMMUTABLE raw
+  → InputProcessor::process(dx, dy, dt_s)
   → (processed_dx, processed_dy)
   → yaw_delta = processed_dx × sens × 0.07
   → camera + InputCameraSample
 ```
 
+### `dt_s` definition (critical for M2.x)
+
+`dt_s` is the inter-sample interval derived from **consecutive raw mouse-event QPC timestamps**, not from Bevy render-frame timing:
+
+```
+sample N-1 timestamp_ns = T1
+sample N   timestamp_ns = T2
+
+dt_s = (T2 - T1) / 1_000_000_000
+```
+
 Rules:
+
+- `dt_s` **must** come from the raw sample stream’s monotonic QPC timestamps.
+- `dt_s` **must not** be `Time::delta_secs()`, frame duration, or any quantity derived from FPS / VSync / present mode.
+- For the first sample in a burst/session (no previous timestamp), use `dt_s = 0.0` (or skip velocity-dependent effects); document the chosen convention in code. Under `NoAcceleration`, the value is unused for the transform but the API still receives the correct interval.
+- The processor API must not become accidentally tied to Bevy’s frame rate. This is required so M2.x Raw Accel (velocity-dependent) can use the same `process` signature without a frame-coupled `dt`.
+
+Rules (general):
 
 - Raw samples never mutated or overwritten.
 - Yaw uses **processed** horizontal counts.
@@ -177,7 +195,8 @@ Indexes: `session_id`.
    - Existing integrity/buffer resets unchanged  
 3. **Running:**  
    - Drain all raw samples  
-   - For each: process → record raw + processed + input camera (as today for camera)  
+   - For each sample: compute `dt_s` from consecutive raw QPC timestamps (see §4); `process(dx, dy, dt_s)` → record raw + processed + input camera  
+   - Do **not** pass render-frame delta into the processor  
    - Processor UI locked  
 4. **End Validation:** existing atomic completion + processed flush  
 5. **Reset Counters:** clear processed buffer with other buffers; integrity reset unchanged  
@@ -203,6 +222,7 @@ Validation Lab controls and 360° procedure remain functional.
 - Unit: `NoAcceleration` identity; factory accepts `"none"`, rejects unknown.
 - Unit: processed sample fields populated correctly for identity case.
 - DB: migrate creates `processed_mouse_events`; flush round-trip inserts paired raw+processed rows.
+- Unit: `dt_s` for sample N uses `(T_n - T_{n-1}) / 1e9`; first sample convention documented; never uses render delta.
 - Existing M1 math / integrity / validation tests remain green.
 - Manual: Start → look → End still works; HUD shows processor; DB has processed rows with `processor_id=none`.
 
@@ -242,3 +262,4 @@ Do not automatically implement M2.x (Raw Accel reproduction). That is a separate
 ## Revision Notes
 
 - **2026-09-17:** Approach 1; processed table B with per-row processor identity; VSync ON lasting baseline (uncapped was temporary M1 test only).
+- **2026-09-17:** `dt_s` must be derived from consecutive raw mouse QPC timestamps, not render-frame / FPS / VSync timing (required for M2.x velocity-dependent processors).
