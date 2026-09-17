@@ -1,7 +1,7 @@
 # M2.x Phase 1.1 — Raw Accel Linear Gain + Caps — Design Spec
 
 **Date:** 2026-09-17  
-**Status:** Draft for user review  
+**Status:** Approved for implementation  
 **Depends on:** M2.x Phase 1 (`docs/superpowers/specs/2026-09-17-m2x-rawaccel-linear-design.md`); `docs/M2X_RAWACCEL_LINEAR.md`  
 **Scope:** Extend `rawaccel_linear` so Gain switch and all three official cap modes match Raw Accel **1:1** (source port). Keep Phase 1 Sensitivity / inactive-cap path as optional verification.
 
