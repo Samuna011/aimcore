@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
+use sense_accel::CapMode;
 
 use crate::{
     camera_ctrl::{
@@ -138,19 +139,17 @@ pub fn draw_hud(
                 ));
             } else {
                 ui.monospace(format!("PROCESSOR: {}", settings.processor_id));
-                let processor_config =
-                    sense_accel::RawAccelLinearConfig::phase1_sensitivity(
-                    settings.acceleration,
-                    settings.sensitivity_multiplier,
-                );
+                let processor_config = settings.rawaccel_linear_config();
                 let version =
                     sense_accel::create_processor(&settings.processor_id, &processor_config)
-                .map(|processor| processor.version().to_string())
-                .unwrap_or_else(|_| "?".into());
+                        .map(|processor| processor.version().to_string())
+                        .unwrap_or_else(|_| "?".into());
                 ui.monospace(format!("PROCESSOR VERSION: {version}"));
             }
             ui.small("Under `none`, processed dx/dy equals raw (identity transform).");
-            ui.small("rawaccel_linear uses Linear + Legacy/Sensitivity.");
+            ui.small(
+                "Gain on uses Linear Gain; Gain off uses Legacy/Sensitivity. Caps match official classic 1:1.",
+            );
             ui.add_enabled_ui(!validation.is_running(), |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Processor (Idle only)");
@@ -166,6 +165,7 @@ pub fn draw_hud(
                         });
                 });
                 if settings.processor_id == "rawaccel_linear" {
+                    ui.checkbox(&mut settings.gain, "Gain");
                     ui.horizontal(|ui| {
                         ui.label("Acceleration");
                         ui.add(
@@ -184,6 +184,61 @@ pub fn draw_hud(
                                 .fixed_decimals(2),
                         );
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Cap mode");
+                        egui::ComboBox::from_id_salt("rawaccel_cap_mode")
+                            .selected_text(match settings.cap_mode {
+                                CapMode::Out => "out",
+                                CapMode::In => "in",
+                                CapMode::Io => "io",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut settings.cap_mode,
+                                    CapMode::Out,
+                                    "out",
+                                );
+                                ui.selectable_value(
+                                    &mut settings.cap_mode,
+                                    CapMode::In,
+                                    "in",
+                                );
+                                ui.selectable_value(
+                                    &mut settings.cap_mode,
+                                    CapMode::Io,
+                                    "io",
+                                );
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Cap X");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.cap_x)
+                                .speed(0.1)
+                                .range(0.0..=10_000.0),
+                        )
+                        .on_hover_text("Input cap; used by in and io modes.");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Cap Y");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.cap_y)
+                                .speed(0.1)
+                                .range(0.0..=10_000.0),
+                        )
+                        .on_hover_text("Output cap; used by out and io modes.");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Input offset");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.input_offset)
+                                .speed(0.1)
+                                .range(0.0..=10_000.0),
+                        );
+                    });
+                    ui.small(
+                        "Trainer defaults: Gain on, Output cap 2, acceleration 0.007, multiplier 1.",
+                    );
                 }
             });
             if validation.is_running() {

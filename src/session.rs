@@ -19,7 +19,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.3.0";
+const EXPERIMENT_VERSION: &str = "0.4.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]
@@ -95,10 +95,7 @@ pub fn start_validation(
         return Err("A validation session is already running.".into());
     }
 
-    let processor_config = sense_accel::RawAccelLinearConfig::phase1_sensitivity(
-        settings.acceleration,
-        settings.sensitivity_multiplier,
-    );
+    let processor_config = settings.rawaccel_linear_config();
     let processor = sense_accel::create_processor(&settings.processor_id, &processor_config)?;
     let processor_id = processor.id().to_string();
     let processor_version = processor.version().to_string();
@@ -331,8 +328,13 @@ mod tests {
 
     use super::{
         integrity_report_with_raw_input_failures, next_config_id, next_session_id, reset_counters,
-        utc_date_from_unix_ms, validation_result,
+        utc_date_from_unix_ms, validation_result, EXPERIMENT_VERSION,
     };
+
+    #[test]
+    fn experiment_version_captures_gain_and_cap_settings() {
+        assert_eq!(EXPERIMENT_VERSION, "0.4.0");
+    }
 
     #[test]
     fn ids_are_stable_and_zero_padded() {
