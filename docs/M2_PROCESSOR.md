@@ -1,7 +1,7 @@
 # M2 Input Processor Framework
 
 **Date:** 2026-09-17  
-**Experiment version:** `0.2.0` (`none` only); `0.3.0` when `rawaccel_linear` is selected  
+**Experiment version:** `0.3.0` for all new sessions, regardless of processor
 **Status:** M2 COMPLETE; M2.x Phase 1 (`rawaccel_linear`) COMPLETE / STOPPED
 
 ---
@@ -97,7 +97,7 @@ sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM processed_mouse_events WHERE s
 sqlite3 data/sense_maxer.db "SELECT processor_id, processor_version, processed_dx, processed_dy FROM processed_mouse_events LIMIT 5;"
 ```
 
-5. Confirm `processor_id = none`, processed dx/dy match paired raw dx/dy, and `experiment_version = 0.2.0` on the session row. For M2.x: select `rawaccel_linear` before Start Validation and confirm `experiment_version = 0.3.0`.
+5. Confirm `processor_id = none`, processed dx/dy match paired raw dx/dy, and `experiment_version = 0.3.0` on the session row. Repeat with `rawaccel_linear`; new sessions use `0.3.0` regardless of processor.
 
 ---
 

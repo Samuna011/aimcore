@@ -26,6 +26,7 @@ const DATABASE_PATH: &str = "data/sense_maxer.db";
 pub struct ValidationSession {
     pub active_session_id: Option<String>,
     pub last_result: Option<ValidationResult>,
+    pub last_result_processor_id: Option<String>,
     pub status_message: Option<String>,
     pub raw_input_read_failures_at_start: u64,
 }
@@ -44,22 +45,35 @@ pub fn database_path() -> PathBuf {
 
 pub fn validation_result(
     sensitivity: f64,
+    processor_id: &str,
     observed_net_counts: i64,
     observed_abs_path_counts: u64,
+    total_yaw_delta_deg: f64,
     integrity: InputIntegrityReport,
 ) -> ValidationResult {
     let expected_counts = sense_math::counts_per_360(sensitivity);
     let observed_net_counts = observed_net_counts as f64;
     let count_difference = observed_net_counts - expected_counts;
+    let expected_degrees = 360.0;
+    let observed_degrees = if processor_id == "none" {
+        sense_math::yaw_delta_deg(observed_net_counts, sensitivity)
+    } else {
+        total_yaw_delta_deg
+    };
+    let error_percent = if processor_id == "none" {
+        (count_difference / expected_counts) * 100.0
+    } else {
+        ((observed_degrees - expected_degrees) / expected_degrees) * 100.0
+    };
 
     ValidationResult {
         expected_counts,
         observed_net_counts,
         observed_abs_path_counts: observed_abs_path_counts as f64,
-        expected_degrees: 360.0,
-        observed_degrees: sense_math::yaw_delta_deg(observed_net_counts, sensitivity),
+        expected_degrees,
+        observed_degrees,
         count_difference,
-        error_percent: (count_difference / expected_counts) * 100.0,
+        error_percent,
         integrity,
     }
 }
@@ -143,6 +157,7 @@ pub fn start_validation(
     session.raw_input_read_failures_at_start = sense_input_win::raw_input_read_failures();
     session.active_session_id = Some(session_id.clone());
     session.last_result = None;
+    session.last_result_processor_id = None;
     session.status_message = Some(format!("Validation running: {session_id}"));
     *validation = ValidationState::Running;
     Ok(())
@@ -155,6 +170,7 @@ pub fn end_validation(
     live: &LiveInputStats,
     buffers: &TelemetryBuffers,
     integrity: &InputIntegrityTracker,
+    active_processor: &ActiveInputProcessor,
 ) -> Result<(), String> {
     if !validation.is_running() {
         return Err("No validation session is running.".into());
@@ -173,7 +189,15 @@ pub fn end_validation(
         session.raw_input_read_failures_at_start,
         sense_input_win::raw_input_read_failures(),
     );
-    let result = validation_result(sensitivity, live.net_dx, live.abs_dx, integrity_report);
+    let processor_id = active_processor.processor.id();
+    let result = validation_result(
+        sensitivity,
+        processor_id,
+        live.net_dx,
+        live.abs_dx,
+        live.total_yaw_delta_deg,
+        integrity_report,
+    );
     let db = open_database()?;
 
     db.complete_validation(session_id, &buffers.0, &result, unix_time_ms()?)?;
@@ -181,6 +205,7 @@ pub fn end_validation(
     let completed_session_id = session_id.to_string();
     session.active_session_id = None;
     session.last_result = Some(result);
+    session.last_result_processor_id = Some(processor_id.to_string());
     session.status_message = Some(format!("Validation completed: {completed_session_id}"));
     *validation = ValidationState::Idle;
     Ok(())
@@ -324,8 +349,10 @@ mod tests {
     fn validation_uses_signed_net_and_separate_absolute_path() {
         let result = validation_result(
             0.5,
+            "none",
             -10,
             14,
+            123.0,
             InputIntegrityReport {
                 samples_received: 2,
                 sequence_gaps: 0,
@@ -344,6 +371,24 @@ mod tests {
             result.error_percent,
             (result.count_difference / result.expected_counts) * 100.0
         );
+    }
+
+    #[test]
+    fn accelerated_validation_uses_camera_yaw_for_degrees_and_error() {
+        let result = validation_result(
+            0.5,
+            "rawaccel_linear",
+            100,
+            120,
+            378.0,
+            IntegrityTracker::default().report(),
+        );
+
+        assert_eq!(result.observed_net_counts, 100.0);
+        assert_eq!(result.observed_abs_path_counts, 120.0);
+        assert_eq!(result.observed_degrees, 378.0);
+        assert_eq!(result.error_percent, 5.0);
+        assert_eq!(result.count_difference, 100.0 - result.expected_counts);
     }
 
     #[test]

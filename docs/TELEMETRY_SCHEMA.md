@@ -1,7 +1,7 @@
 # Telemetry Schema (M1 + M2)
 
 **Date:** 2026-09-17  
-**M2:** adds `processed_mouse_events`; `experiment_version` → `0.2.0` for new sessions  
+**M2:** adds `processed_mouse_events`; all new sessions use `experiment_version` `0.3.0`
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -60,7 +60,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.2.0` (M2 processor framework) |
+| `experiment_version` | TEXT | `0.3.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -150,9 +150,9 @@ Persisted outcome of End Validation, including math discrepancy and input-integr
 | `observed_net_counts` | REAL | **signed** Σ `raw_dx` (net horizontal counts) |
 | `observed_abs_path_counts` | REAL | Σ \|raw_dx\| — telemetry only, **not** used for validation math |
 | `expected_degrees` | REAL | 360 |
-| `observed_degrees` | REAL | `yaw_delta_deg(observed_net_counts, sensitivity)` |
-| `count_difference` | REAL | observed_net − expected counts |
-| `error_percent` | REAL | `(count_difference / expected_counts) × 100` |
+| `observed_degrees` | REAL | Under `none`: raw-count-derived yaw; under acceleration: accumulated camera yaw delta |
+| `count_difference` | REAL | Raw observed_net − raw expected counts (telemetry; not 360° proof under acceleration) |
+| `error_percent` | REAL | Under `none`: count difference percentage; under acceleration: `(observed_degrees − 360) / 360 × 100` |
 | `samples_received` | INTEGER | total raw samples in validation window |
 | `sequence_gaps` | INTEGER | missing sequence numbers |
 | `duplicate_sequences` | INTEGER | repeated sequence numbers |

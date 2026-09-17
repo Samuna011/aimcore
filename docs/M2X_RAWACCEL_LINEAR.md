@@ -3,7 +3,7 @@
 **Date:** 2026-09-17  
 **Processor id:** `rawaccel_linear`  
 **Processor version:** `1.0.0`  
-**Experiment version:** `0.3.0` (sessions using this processor)  
+**Experiment version:** `0.3.0` for all new sessions, regardless of processor
 **Status:** COMPLETE / STOPPED — Phase 1 only
 
 ---
@@ -168,7 +168,7 @@ Live wiring is confirmation, not first proof. Mandatory tests in `crates/sense-a
 
 ## Stop After Phase 1
 
-**STOP.** Phase 1 is complete. Unit tests prove documented math; smoke validation confirms wiring.
+**STOP.** Phase 1 is complete. Unit tests prove the documented math. Live GUI/SQLite smoke validation remains operator-pending and is confirmation only.
 
 Further Raw Accel modes (Natural, Classic general, Gain), caps/offsets, LUT infrastructure, or driver-side comparison require a **new design spec and approval cycle**. Do not implement without one.
 

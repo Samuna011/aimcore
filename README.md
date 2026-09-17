@@ -14,7 +14,7 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M2 status:** COMPLETE. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`).
 
-**M2.x status:** Phase 1 COMPLETE / STOPPED. Processors: `none` (`experiment_version` `0.2.0`) and `rawaccel_linear` (`0.3.0`). Documents mathematical behavior only — not actual-driver comparison. **Stopped** before Natural/Classic/Gain/LUT/driver comparison.
+**M2.x status:** Phase 1 COMPLETE / STOPPED. Processors: `none` and `rawaccel_linear`; all new sessions use `experiment_version` `0.3.0`. Documents mathematical behavior only — not actual-driver comparison. **Stopped** before Natural/Classic/Gain/LUT/driver comparison.
 
 ## Requirements
 

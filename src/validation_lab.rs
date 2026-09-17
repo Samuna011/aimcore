@@ -112,6 +112,7 @@ pub fn draw_hud(
                         &live_input,
                         &buffers,
                         &integrity,
+                        &active_processor,
                     ) {
                         session.status_message = Some(format!("End failed: {error}"));
                     }
@@ -266,6 +267,11 @@ pub fn draw_hud(
             if let Some(result) = &session.last_result {
                 ui.separator();
                 ui.strong("VALIDATION RESULT");
+                if session.last_result_processor_id.as_deref() != Some("none") {
+                    ui.small(
+                        "Under acceleration, M1 expected-counts is not a 360° proof; degrees use camera yaw delta.",
+                    );
+                }
                 ui.monospace(format!("EXPECTED COUNTS: {:.6}", result.expected_counts));
                 ui.monospace(format!(
                     "OBSERVED NET COUNTS: {:+.6}",
