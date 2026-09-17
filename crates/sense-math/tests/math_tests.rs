@@ -48,3 +48,26 @@ fn inches_and_cm_relationship() {
     let sens = 0.175;
     assert_eq!(cm_per_360(dpi, sens), inches_per_360(dpi, sens) * 2.54);
 }
+
+#[test]
+fn pitch_positive_dy_looks_down() {
+    // +pitch = look up ⇒ +dy yields negative delta
+    let d = pitch_delta_deg(1000.0, 0.175);
+    assert!((d - (-12.25)).abs() < 1e-12);
+}
+
+#[test]
+fn pitch_and_yaw_same_magnitude() {
+    let sens = 0.09;
+    let yaw = yaw_delta_deg(500.0, sens).abs();
+    let pitch = pitch_delta_deg(500.0, sens).abs();
+    assert!((yaw - pitch).abs() < 1e-12);
+}
+
+#[test]
+fn pitch_clamps_at_pm_89() {
+    assert_eq!(clamp_pitch_deg(90.0), 89.0);
+    assert_eq!(clamp_pitch_deg(-90.0), -89.0);
+    let p = apply_pitch_delta(88.0, 1_000_000.0, 1.0);
+    assert_eq!(p, -89.0); // large +dy drives look-down to floor
+}
