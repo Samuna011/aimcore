@@ -3,8 +3,8 @@ use std::path::Path;
 use sense_telemetry::{SessionBuffers, TelemetryDb};
 use sense_types::{
     AccelerationConfig, ConfigurationRecord, DisplayConfig, FovAxis, FrameSample,
-    InputCameraSample, InputIntegrityReport, MouseSample, SensitivityConfig, SessionRecord,
-    ValidationResult,
+    InputCameraSample, InputIntegrityReport, MouseSample, ProcessedMouseSample, SensitivityConfig,
+    SessionRecord, ValidationResult,
 };
 
 #[test]
@@ -67,6 +67,26 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
                 sequence_number: 2,
             },
         ],
+        processed: vec![
+            ProcessedMouseSample {
+                timestamp_ns: 10,
+                sequence_number: 1,
+                processed_dx: 4.0,
+                processed_dy: -2.0,
+                processor_id: "none".into(),
+                processor_version: "1.0.0".into(),
+                processor_config_json: "{}".into(),
+            },
+            ProcessedMouseSample {
+                timestamp_ns: 20,
+                sequence_number: 2,
+                processed_dx: 5.0,
+                processed_dy: -3.0,
+                processor_id: "none".into(),
+                processor_version: "1.0.0".into(),
+                processor_config_json: "{}".into(),
+            },
+        ],
         input_camera: vec![
             InputCameraSample {
                 timestamp_ns: 10,
@@ -109,6 +129,7 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
 
     for (table, expected) in [
         ("raw_mouse_events", 2),
+        ("processed_mouse_events", 2),
         ("input_camera_samples", 2),
         ("frame_samples", 1),
         ("validation_results", 1),
@@ -121,6 +142,16 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
             .unwrap();
         assert_eq!(count, expected, "unexpected row count in {table}");
     }
+
+    let processor_id: String = db
+        .connection
+        .query_row(
+            "SELECT processor_id FROM processed_mouse_events WHERE sequence_number = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(processor_id, "none");
 
     let stored_end_unix_ms: i64 = db
         .connection

@@ -17,9 +17,19 @@ impl TelemetryDb {
     }
 
     pub fn migrate(&self) -> Result<(), String> {
-        self.connection
-            .execute_batch(
-                r#"
+        let has_m1_schema = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'configurations')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+
+        if !has_m1_schema {
+            self.connection
+                .execute_batch(
+                    r#"
 CREATE TABLE configurations (
   id TEXT PRIMARY KEY,
   dpi REAL NOT NULL,
@@ -96,6 +106,27 @@ CREATE TABLE validation_results (
 CREATE INDEX idx_raw_mouse_session ON raw_mouse_events(session_id);
 CREATE INDEX idx_input_cam_session ON input_camera_samples(session_id);
 CREATE INDEX idx_frame_session ON frame_samples(session_id);
+"#,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        self.connection
+            .execute_batch(
+                r#"
+CREATE TABLE IF NOT EXISTS processed_mouse_events (
+  session_id TEXT NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  processed_dx REAL NOT NULL,
+  processed_dy REAL NOT NULL,
+  processor_id TEXT NOT NULL,
+  processor_version TEXT NOT NULL,
+  processor_config_json TEXT NOT NULL,
+  PRIMARY KEY(session_id, sequence_number)
+);
+CREATE INDEX IF NOT EXISTS idx_processed_mouse_session
+  ON processed_mouse_events(session_id);
 "#,
             )
             .map_err(|error| error.to_string())
@@ -291,6 +322,33 @@ INSERT INTO raw_mouse_events (
                     sample.dx,
                     sample.dy,
                     sample.buttons,
+                ])
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    {
+        let mut statement = connection
+            .prepare(
+                r#"
+INSERT INTO processed_mouse_events (
+  session_id, sequence_number, timestamp_ns, processed_dx, processed_dy,
+  processor_id, processor_version, processor_config_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+            )
+            .map_err(|error| error.to_string())?;
+        for sample in &buffers.processed {
+            statement
+                .execute(params![
+                    session_id,
+                    as_i64(sample.sequence_number, "processed mouse sequence number")?,
+                    as_i64(sample.timestamp_ns, "processed mouse timestamp")?,
+                    sample.processed_dx,
+                    sample.processed_dy,
+                    sample.processor_id,
+                    sample.processor_version,
+                    sample.processor_config_json,
                 ])
                 .map_err(|error| error.to_string())?;
         }
