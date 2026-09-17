@@ -207,6 +207,27 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 **Cross-run note:** Two different sensitivities (0.175 then 0.09) both produced sub-0.05% freehand error with `pipeline_suspect=false`. That is consistent with a working counts→degrees path across configurations.
 
+### Run 3 — VSync OFF / FPS uncapped (rendering config verification)
+
+**Purpose:** Confirm that `PresentMode::AutoNoVsync` and uncapped rendering do not change raw-input integrity or yaw math. Same DPI/sens/procedure as Run 2 where practical (3200 DPI / 0.09).
+
+**Config change:** Window `present_mode = PresentMode::AutoNoVsync`. No application FPS cap. Input pipeline unchanged. No mouse-to-photon latency claim.
+
+| Field | Value |
+|-------|-------|
+| Present mode | AutoNoVsync (VSync OFF requested) |
+| DPI / Sensitivity | 3200 / 0.09 (same as Run 2) |
+| Expected counts | |
+| Observed net counts | |
+| Observed abs path | |
+| Observed degrees | |
+| Error % | |
+| Pipeline suspect | |
+| FPS / frame time notes | |
+| Operator notes | |
+
+*(Fill after the verification 360° run.)*
+
 ---
 
 ## 12. Known Uncertainties

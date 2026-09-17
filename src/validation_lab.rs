@@ -182,6 +182,8 @@ pub fn draw_hud(
                 live_input.total_yaw_delta_deg
             ));
             ui.separator();
+            ui.monospace(format!("PRESENT MODE: {:?}", window.present_mode));
+            ui.small("VSync: OFF requested (PresentMode::AutoNoVsync). FPS uncapped; no 240 FPS app limit.");
             ui.monospace(format!("FPS: {:.1}", live_frame.fps));
             ui.monospace(format!(
                 "FRAME TIME: {:.3} ms",

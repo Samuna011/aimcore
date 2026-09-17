@@ -1,6 +1,8 @@
 use bevy::{
     prelude::*,
-    window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowPlugin, WindowResolution},
+    window::{
+        CursorGrabMode, CursorOptions, PresentMode, PrimaryWindow, WindowPlugin, WindowResolution,
+    },
 };
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
@@ -30,6 +32,9 @@ pub fn run() {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
                 resolution: WindowResolution::new(1280, 720),
+                // VSync OFF / uncapped: prefer Immediate, then Mailbox; Fifo only if neither available.
+                // Does not measure mouse-to-photon latency. Does not couple input to render FPS.
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
             ..default()
