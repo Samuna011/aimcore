@@ -137,13 +137,17 @@ pub fn draw_hud(
                 ));
             } else {
                 ui.monospace(format!("PROCESSOR: {}", settings.processor_id));
-                let version =
-                    sense_accel::create_processor(&settings.processor_id, 0.01, 1.0)
-                    .map(|processor| processor.version().to_string())
-                    .unwrap_or_else(|_| "?".into());
+                let version = sense_accel::create_processor(
+                    &settings.processor_id,
+                    settings.acceleration,
+                    settings.sensitivity_multiplier,
+                )
+                .map(|processor| processor.version().to_string())
+                .unwrap_or_else(|_| "?".into());
                 ui.monospace(format!("PROCESSOR VERSION: {version}"));
             }
             ui.small("Under `none`, processed dx/dy equals raw (identity transform).");
+            ui.small("rawaccel_linear uses Linear + Legacy/Sensitivity.");
             ui.add_enabled_ui(!validation.is_running(), |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Processor (Idle only)");
@@ -151,8 +155,33 @@ pub fn draw_hud(
                         .selected_text(&settings.processor_id)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut settings.processor_id, "none".into(), "none");
+                            ui.selectable_value(
+                                &mut settings.processor_id,
+                                "rawaccel_linear".into(),
+                                "rawaccel_linear",
+                            );
                         });
                 });
+                if settings.processor_id == "rawaccel_linear" {
+                    ui.horizontal(|ui| {
+                        ui.label("Acceleration");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.acceleration)
+                                .speed(0.001)
+                                .range(0.0..=10.0)
+                                .fixed_decimals(3),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Sensitivity multiplier");
+                        ui.add(
+                            egui::DragValue::new(&mut settings.sensitivity_multiplier)
+                                .speed(0.01)
+                                .range(0.01..=10.0)
+                                .fixed_decimals(2),
+                        );
+                    });
+                }
             });
             if validation.is_running() {
                 ui.small("Processor locked while validation is running (snapshotted at Start).");

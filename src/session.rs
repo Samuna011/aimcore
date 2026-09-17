@@ -19,7 +19,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.2.0";
+const EXPERIMENT_VERSION: &str = "0.3.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]
@@ -81,7 +81,11 @@ pub fn start_validation(
         return Err("A validation session is already running.".into());
     }
 
-    let processor = sense_accel::create_processor(&settings.processor_id, 0.01, 1.0)?;
+    let processor = sense_accel::create_processor(
+        &settings.processor_id,
+        settings.acceleration,
+        settings.sensitivity_multiplier,
+    )?;
     let processor_id = processor.id().to_string();
     let processor_version = processor.version().to_string();
     let processor_config_json = processor.config_json();
@@ -112,7 +116,7 @@ pub fn start_validation(
             refresh_hz: refresh_hz.unwrap_or(0.0),
         },
         accel: AccelerationConfig {
-            enabled: false,
+            enabled: settings.processor_id != "none",
             model: processor_id.clone(),
             processor_id,
             processor_version,

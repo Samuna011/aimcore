@@ -22,6 +22,8 @@ pub struct ExperimentSettings {
     pub sensitivity: f64,
     pub fov_degrees_h: f64,
     pub processor_id: String,
+    pub acceleration: f64,
+    pub sensitivity_multiplier: f64,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,9 @@ impl Default for ExperimentSettings {
             sensitivity: 0.09,
             fov_degrees_h: 103.0,
             processor_id: "none".into(),
+            // Trainer default only; this is not the official Raw Accel default.
+            acceleration: 0.01,
+            sensitivity_multiplier: 1.0,
         }
     }
 }
@@ -82,5 +87,13 @@ mod tests {
     #[test]
     fn processor_defaults_to_none() {
         assert_eq!(ExperimentSettings::default().processor_id, "none");
+    }
+
+    #[test]
+    fn rawaccel_linear_settings_use_trainer_defaults() {
+        let settings = ExperimentSettings::default();
+
+        assert_eq!(settings.acceleration, 0.01);
+        assert_eq!(settings.sensitivity_multiplier, 1.0);
     }
 }
