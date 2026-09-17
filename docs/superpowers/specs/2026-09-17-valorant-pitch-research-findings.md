@@ -82,11 +82,11 @@ What Aimlabs **does not** publish (in these sources):
 |-------|---------|------------|
 | Hipfire yaw: `dx × sens × 0.07` | Community converters; our Validation Lab | **UNCERTAIN** (vs Riot) / **EMPIRICALLY TESTED** (trainer) |
 | Valorant hipfire uses **one** sens (no separate pitch slider) | Valorant UI; Aimlabs Valorant profile; converters | **DERIVED** / industry practice |
-| Hipfire pitch: `dy × sens × 0.07` (same constant as yaw) | Implication of single-sens + Aimlabs 1:1 profile; no contradictory public constant found | **UNCERTAIN** — **best available hypothesis; approved to proceed on this assumption** |
+| Hipfire pitch: `dy × sens × 0.07` (same constant as yaw) | Single-sens UI; Aimlabs 1:1 profile; converters; **operator-supplied reliable findings** | **UNCERTAIN** vs Riot primary — **approved implementation assumption** |
 | HFOV 103° | Valorant fixed FOV; Aimlabs profile | **CONFIRMED** as established project baseline |
-| Pitch clamp ±89° | Common UE/FPS pattern only | **UNCERTAIN** |
-| Mouse Y sign (which way is look-up) | Not settled in surveyed sources | **UNCERTAIN** — must be chosen explicitly at implement time and labeled |
-| FOV/resolution do not change hipfire deg/count | Same policy as yaw in `VALORANT_INPUT_MODEL.md` | **DERIVED** (policy) |
+| Pitch clamp ≈ ±89° | UE4 gimbal-lock avoidance (operator findings; common UE pattern) | **UNCERTAIN** — **approved implementation assumption** |
+| Mouse Y sign: **positive ΔY → look down** | Operator-supplied reliable findings; common FPS/UE | **UNCERTAIN** — **approved implementation assumption** |
+| FOV/resolution do not change hipfire deg/count | Operator findings + existing yaw policy | **DERIVED** / approved assumption |
 
 ---
 
@@ -95,16 +95,19 @@ What Aimlabs **does not** publish (in these sources):
 **Name:** `UnverifiedPitchModel` (or equivalent)
 
 ```
-pitch_delta_deg = processed_dy × sensitivity × 0.07   // SAME constant as yaw
-pitch_deg = clamp(pitch_deg + pitch_delta_deg, PITCH_MIN, PITCH_MAX)
+pitch_delta_deg = -(processed_dy × sensitivity × 0.07)
+// positive mouse ΔY (forward) → look down ⇒ subtract from pitch if +pitch is look-up
+// Equivalently: if engine pitch+ is look-up, apply negative of (dy × sens × 0.07)
+
+pitch_deg = clamp(pitch_deg + pitch_delta_deg, -89.0, +89.0)
 ```
 
-| Parameter | Candidate default | Confidence |
-|-----------|-------------------|------------|
-| Constant | `0.07` (shared with yaw) | **UNCERTAIN** (assumption locked) |
-| `PITCH_MIN` / `PITCH_MAX` | `-89.0` / `+89.0` | **UNCERTAIN** |
-| Sign of `processed_dy` | TBD at implement (document which convention) | **UNCERTAIN** |
-| Input | **Processed** `dy` (same processor path as yaw’s `dx`) | **DERIVED** from M2 architecture |
+| Parameter | Locked default | Confidence |
+|-----------|----------------|------------|
+| Constant | `0.07` (shared with yaw) | **UNCERTAIN** (approved assumption) |
+| `PITCH_MIN` / `PITCH_MAX` | `-89.0` / `+89.0` | **UNCERTAIN** (approved assumption) |
+| Sign | Positive `processed_dy` → **look down** | **UNCERTAIN** (approved assumption) |
+| Input | **Processed** `dy` | **DERIVED** from M2 |
 
 **Rules:**
 
@@ -161,3 +164,10 @@ Next step when ready: new brainstorm/design for **implementing** `UnverifiedPitc
 ## Revision Notes
 
 - **2026-09-17:** Research-only cycle. Approach 1. Aimlabs Valorant Game Profile (1:1 scaling, HFOV 103) recorded. Proceed with pitch = yaw constant `0.07` as best available UNCERTAIN hypothesis; clamp/sign remain UNCERTAIN.
+- **2026-09-17 (operator-supplied reliable findings):** Locked candidate details for implementation:
+  - Yaw: `ΔX × Sensitivity × 0.07`
+  - Pitch scalar: **same** `0.07`/count; no separate vertical sens
+  - Pitch direction: **positive ΔY → look down**
+  - Pitch limit: **clamp ≈ ±89°** (UE4 gimbal-lock avoidance)
+  - FOV/resolution independence: rotation per count is angular only (same policy as yaw)
+  Confidence vs Riot primary docs remains **UNCERTAIN** unless/until a primary/official citation is attached; treated as **approved implementation assumption** for `UnverifiedPitchModel`.
