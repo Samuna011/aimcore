@@ -23,7 +23,7 @@ Under `none` / `NoAcceleration`, processed counts equal raw counts and validatio
 ## Pipeline
 
 1. **Idle:** HUD shows selected `processor_id` (`"none"` or `"rawaccel_linear"`). DPI/sensitivity editable. Processor selection and `rawaccel_linear` config editable only while Idle.
-2. **Start Validation:** `create_processor(selected_id)`; snapshot id/version/config into `ConfigurationRecord`; install `ActiveInputProcessor`; reset timing and buffers.
+2. **Start Validation:** `create_processor(selected_id, acceleration, sensitivity_multiplier)` from session settings (extra args ignored for `"none"`); snapshot id/version/config into `ConfigurationRecord`; install `ActiveInputProcessor`; reset timing and buffers.
 3. **Running:** Drain all queued raw samples. For each sample:
    - Compute `dt_s` from consecutive raw QPC timestamps (see below).
    - Call `process(dx, dy, dt_s)` → `(processed_dx, processed_dy)`.
@@ -97,7 +97,7 @@ sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM processed_mouse_events WHERE s
 sqlite3 data/sense_maxer.db "SELECT processor_id, processor_version, processed_dx, processed_dy FROM processed_mouse_events LIMIT 5;"
 ```
 
-5. Confirm `processor_id = none`, processed dx/dy match paired raw dx/dy, and `experiment_version = 0.2.0` on the session row.
+5. Confirm `processor_id = none`, processed dx/dy match paired raw dx/dy, and `experiment_version = 0.2.0` on the session row. For M2.x: select `rawaccel_linear` before Start Validation and confirm `experiment_version = 0.3.0`.
 
 ---
 
