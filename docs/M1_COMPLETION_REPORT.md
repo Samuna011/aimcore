@@ -184,6 +184,29 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 **DPI metadata correction:** The operator’s Logitech mouse was set to **3200 DPI**, but this first session used the app default of **1600 DPI** in the configuration snapshot. That does **not** invalidate the counts→degrees result (yaw math ignores DPI). It does mean stored **eDPI** and **cm/360** for that session were wrong relative to physical mouse distance. App default DPI is now **3200**; DPI is editable in the HUD while Idle.
 
+### Run 2 — 3200 DPI / 0.09 sens (eDPI 288)
+
+**Date recorded:** 2026-09-17  
+**Method:** human-performed continuous horizontal 360° (single direction)
+
+| Field | Value |
+|-------|-------|
+| DPI / Sensitivity / eDPI | 3200 / 0.09 / 288 |
+| Expected counts | 57142.857143 |
+| Observed net counts | +57115.000000 |
+| Observed abs path counts | 57159.000000 |
+| Expected degrees | 360.000000 |
+| Observed degrees | +359.824500 |
+| Count difference | −27.857143 |
+| Error % | −0.048750% |
+| Samples received | 5492 |
+| Integrity faults | all 0 |
+| Pipeline suspect | **false** |
+
+**Interpretation:** Same pattern as Run 1 — clean integrity, small human shortfall (~0.05%, ~28 counts / ~0.18°). Abs path (57159) > net (57115) by 44 counts again shows minor reverse/micro-correction. Expected counts correctly scaled with the lower sensitivity (≈2× Run 1’s counts/360). No evidence of a broken yaw constant; do not auto-compensate.
+
+**Cross-run note:** Two different sensitivities (0.175 then 0.09) both produced sub-0.05% freehand error with `pipeline_suspect=false`. That is consistent with a working counts→degrees path across configurations.
+
 ---
 
 ## 12. Known Uncertainties
