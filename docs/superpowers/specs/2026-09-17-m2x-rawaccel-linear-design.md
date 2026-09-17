@@ -78,13 +78,13 @@ Translating our QPC-derived interval into ms is **DERIVED** (our time base → u
 
 ### 4.2 Whole-vector input speed
 
-When \(dt_{ms} > 0\):
+When `dt_ms > 0`:
 
-\[
-\boxed{v = \frac{\sqrt{dx^{2} + dy^{2}}}{dt_{ms}}}
-\]
+```
+v = sqrt((dx * dx) + (dy * dy)) / dt_ms
+```
 
-Units: **counts/ms**. The Guide example \((30,40)\) over 1 ms → \(v = 50\) is consistent with this formula only (not \((dx^{2}+dy^{2})/dt\)).
+Units: **counts/ms**. The Guide example `(30,40)` over 1 ms → `v = 50` is consistent with this formula only (not `(dx*dx + dy*dy) / dt_ms` without the square root).
 
 ### 4.3 Linear scale and apply
 
@@ -121,7 +121,7 @@ Defined debug values keep the boundary deterministic and testable.
 ### 4.5 Normal path (`dt_ms > 0`)
 
 ```
-input_speed         = sqrt(dx² + dy²) / dt_ms
+input_speed         = sqrt((dx * dx) + (dy * dy)) / dt_ms
 acceleration_scale  = 1 + acceleration * input_speed
 processed           = raw × acceleration_scale × sensitivity_multiplier
 bypassed_nonpositive_dt = false
@@ -281,4 +281,5 @@ Further Raw Accel modes, Gain, caps/offsets, or driver-side comparison are separ
 
 ## Revision Notes
 
-- **2026-09-17:** Approach 1 (minimal faithful Linear). Naming: Raw Accel Linear reproduced from official implementation; Classic exponent-2 equivalence only where documented. Explicit \(\sqrt{\cdot}/dt_{ms}\) speed; trainer `dt_ms≤0` boundary with defined debug fields; mandatory Guide + sign-preservation tests; debug fields before DB columns.
+- **2026-09-17:** Approach 1 (minimal faithful Linear). Naming: Raw Accel Linear reproduced from official implementation; Classic exponent-2 equivalence only where documented. Explicit `v = sqrt((dx * dx) + (dy * dy)) / dt_ms`; trainer `dt_ms≤0` boundary with defined debug fields; mandatory Guide + sign-preservation tests; debug fields before DB columns.
+- **2026-09-17:** Speed formula rewritten in unambiguous code form (no LaTeX fraction ambiguity).
