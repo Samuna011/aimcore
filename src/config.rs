@@ -50,7 +50,7 @@ impl Default for ExperimentSettings {
         // Does NOT enter camera yaw math (degrees_per_count uses sensitivity only).
         Self {
             dpi: 3200.0,
-            sensitivity: 0.175,
+            sensitivity: 0.09,
             fov_degrees_h: 103.0,
         }
     }

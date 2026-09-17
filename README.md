@@ -52,9 +52,9 @@ Opens the Validation Lab window (1280×720 default).
 5. Press **Esc** to unlock cursor, then **End Validation**.
 6. **Reset Counters** — retry within the same session (clears live counters and in-memory buffers).
 
-Default settings: DPI **3200** (matches declared Logitech hardware DPI), sensitivity 0.175, horizontal FOV 103°.
+Default settings: DPI **3200**, sensitivity **0.09**, horizontal FOV 103° → **eDPI = 288**.
 
-Note: at 3200 × 0.175, **eDPI = 560** (not 280). If you want eDPI 280 at 3200 DPI, set sensitivity to **0.0875**. DPI does not change yaw math; it only affects eDPI / cm/360 metadata.
+DPI does not change yaw math; it only affects eDPI / cm/360 metadata. Sensitivity alone sets counts/360.
 
 ## Test
 
