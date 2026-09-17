@@ -14,7 +14,7 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M2 status:** COMPLETE. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`).
 
-**M2.x status:** Phase 1 COMPLETE / STOPPED. Processors: `none` and `rawaccel_linear`; all new sessions use `experiment_version` `0.3.0`. Documents mathematical behavior only — not actual-driver comparison. **Stopped** before Natural/Classic/Gain/LUT/driver comparison.
+**M2.x status:** Phase 1.1 COMPLETE / STOPPED. Processors: `none` and `rawaccel_linear` (v1.1.0, Gain + caps); all new sessions use `experiment_version` `0.4.0`. Documents mathematical behavior 1:1 with official source — not actual-driver comparison. **Stopped** before Natural/anisotropy/LUT/driver comparison.
 
 ## Requirements
 
@@ -84,4 +84,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1 (`rawaccel_linear`) complete (`docs/M2X_RAWACCEL_LINEAR.md`). **Stopped** before further Raw Accel modes and STATIC_CLICK.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). **Stopped** before Natural/anisotropy/LUT/driver comparison and STATIC_CLICK.

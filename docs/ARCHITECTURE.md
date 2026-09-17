@@ -1,7 +1,7 @@
 # Architecture — VALORANT Input Validation Lab (M1 + M2)
 
 **Date:** 2026-09-17  
-**Scope:** M1 Validation Lab + M2 InputProcessor framework + M2.x Phase 1 (`rawaccel_linear` — documented math only, not driver comparison); no aim tasks.  
+**Scope:** M1 Validation Lab + M2 InputProcessor framework + M2.x Phase 1.1 (`rawaccel_linear` v1.1.0 — Gain + caps, documented math only, not driver comparison); no aim tasks.  
 **Stack:** Bevy `0.19.1`, `bevy_egui` `0.42.0`, Windows only.
 
 ---
@@ -63,7 +63,7 @@ Primary subject: the developer. Priorities: input accuracy, low/predictable inpu
 sense-maxer/
   crates/
     sense-math/          # degrees/count, eDPI, cm/360, inches/360 (no Bevy)
-    sense-accel/         # InputProcessor trait, NoAcceleration, RawAccelLinear, factory (M2 + M2.x)
+    sense-accel/         # InputProcessor trait, NoAcceleration, RawAccelLinear (classic_linear 1:1 port), factory (M2 + M2.x)
     sense-types/         # MouseSample, ProcessedMouseSample, Session, Configuration
     sense-telemetry/     # in-memory buffers + batched SQLite writer
     sense-input-win/     # WM_INPUT → timestamped queue
@@ -216,7 +216,7 @@ Raw MouseSample → compute dt_s from QPC timestamps → process(dx, dy, dt_s) �
 |-----------|------|
 | `ActiveInputProcessor` | NonSend resource; installed at Start Validation, frozen while Running |
 | `ProcessorTimingState` | Tracks last raw timestamp for `dt_s`; reset on Start / Reset Counters |
-| `create_processor(id, acceleration, sensitivity_multiplier)` | Factory; accepts `"none"` or `"rawaccel_linear"`; extra args ignored for `"none"` |
+| `create_processor(id, &RawAccelLinearConfig)` | Factory; accepts `"none"` or `"rawaccel_linear"`; config ignored for `"none"` |
 | `processed_mouse_events` | SQLite table; per-row processor id/version/config |
 
 Rules:
@@ -226,7 +226,7 @@ Rules:
 - Processor selected only at session start; HUD locks selection while Running.
 - Raw table unchanged; processed stored separately.
 
-M2.x Phase 1 adds `rawaccel_linear` (Raw Accel Linear, Legacy / Sensitivity). Further modes (Natural, Classic general, Gain, Custom/LUT) require a new design cycle.
+M2.x Phase 1.1 adds `rawaccel_linear` v1.1.0 (Raw Accel Linear, Gain + caps, 1:1 classic port). Further modes (Natural, Power, Jump, LUT, driver comparison) require a new design cycle.
 
 See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline and manual checklist; [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md) for M2.x provenance and stop gate.
 
@@ -236,7 +236,7 @@ See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline and manual checklist; [M2X
 
 - STATIC_CLICK / flick / tracking / target switching
 - Movement segmentation and flick phase classifier
-- Raw Accel modes beyond M2.x Phase 1 `rawaccel_linear` (Natural, Classic general, Gain, LUT, driver comparison)
+- Raw Accel modes beyond M2.x Phase 1.1 `rawaccel_linear` (Natural, Power, Jump, LUT, anisotropy, driver comparison)
 - ML / Bayesian optimization / auto sensitivity search
 - Separate research UI process (Vue/Tauri/etc.)
 - CSV/JSON export tooling
@@ -253,5 +253,5 @@ See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline and manual checklist; [M2X
 - [VALORANT_INPUT_MODEL.md](./VALORANT_INPUT_MODEL.md) — formulas, units, provenance
 - [TELEMETRY_SCHEMA.md](./TELEMETRY_SCHEMA.md) — tables, raw vs derived
 - [M2_PROCESSOR.md](./M2_PROCESSOR.md) — M2 processor framework
-- [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md) — M2.x Phase 1 provenance and stop gate
+- [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md) — M2.x Phase 1.1 provenance and stop gate
 - [EXPERIMENT_MODEL.md](./EXPERIMENT_MODEL.md) — Validation Lab flow, session/config IDs
