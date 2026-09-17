@@ -1,6 +1,6 @@
 use bevy::{
     camera::Projection,
-    math::primitives::{Cuboid, Plane3d},
+    math::primitives::Plane3d,
     prelude::*,
     window::PrimaryWindow,
 };
@@ -34,16 +34,6 @@ pub fn setup_scene(
             perceptual_roughness: 0.95,
             ..default()
         })),
-    ));
-
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.8, 0.22, 0.12),
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 1.0, -6.0),
     ));
 }
 

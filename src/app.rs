@@ -7,7 +7,7 @@ use bevy::{
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
-    aim_trial::{spawn_aim_target, sync_aim_target, AimTrial},
+    aim_trial::{spawn_aim_arena, spawn_aim_target, sync_aim_target, AimTrial},
     camera_ctrl::{
         apply_yaw_transform, drain_mouse_to_camera, ActiveInputProcessor, LiveInputStats,
         ProcessorTimingState,
@@ -45,7 +45,7 @@ pub fn run() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_plugins(RawInputPlugin)
-        .add_systems(Startup, (setup_scene, spawn_aim_target))
+        .add_systems(Startup, (setup_scene, spawn_aim_arena, spawn_aim_target))
         .add_systems(
             Update,
             (

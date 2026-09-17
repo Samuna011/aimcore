@@ -153,7 +153,7 @@ pub fn draw_hud(
             ui.separator();
             ui.strong("STATIC_CLICK (M3)");
             ui.small(
-                "5 hits in a front cone (±25° yaw, ±12° pitch). Hit destroys & respawns; miss keeps target. Score = time for 5 hits.",
+                "5 hits in a front cone (±25° yaw, −5°…+12° pitch, above floor). Hit destroys & respawns; miss keeps target. Score = time for 5 hits. Blue box = aim volume.",
             );
             ui.horizontal(|ui| {
                 let can_start_aim =
