@@ -1,7 +1,7 @@
-# Architecture — VALORANT Input Validation Lab (M1)
+# Architecture — VALORANT Input Validation Lab (M1 + M2)
 
 **Date:** 2026-09-17  
-**Scope:** Milestone 1 only — Validation Lab; no aim tasks.  
+**Scope:** M1 Validation Lab + M2 InputProcessor framework; no aim tasks; no Raw Accel math.  
 **Stack:** Bevy `0.19.1`, `bevy_egui` `0.42.0`, Windows only.
 
 ---
@@ -11,8 +11,10 @@
 sense-maxer is a controlled experimental instrument for long-term mouse-input / sensitivity research. M1 is **not** a commercial aim trainer. It proves this pipeline end-to-end:
 
 ```
-RAW MOUSE INPUT → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
+RAW MOUSE INPUT → INPUT PROCESSOR → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
 ```
+
+M2 adds the processor step; under `none`, processed counts equal raw and behavior matches M1.
 
 Primary subject: the developer. Priorities: input accuracy, low/predictable input-to-camera latency, mathematical VALORANT yaw equivalence, raw telemetry integrity, reproducibility.
 
@@ -30,10 +32,10 @@ Primary subject: the developer. Priorities: input accuracy, low/predictable inpu
 │  └──────────────┘   └─────────────┘   └──────┬───────┘  │
 │                                              │          │
 │         ┌────────────────────────────────────┼───────┐  │
-│         ▼                                    ▼       │  │
+│         ▼                    ▼               ▼       │  │
 │  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │  │
-│  │ Telemetry   │  │ ValorantYaw  │  │ Camera      │ │  │
-│  │ raw + cam   │  │ sense-math   │  │ yaw only    │ │  │
+│  │ Telemetry   │  │ InputProc.   │  │ ValorantYaw │ │  │
+│  │ raw+proc+cam│  │ sense-accel  │  │ sense-math  │ │  │
 │  └──────┬──────┘  └──────────────┘  └──────┬──────┘ │  │
 │         │                                   │        │  │
 │         ▼                                   ▼        │  │
@@ -61,7 +63,8 @@ Primary subject: the developer. Priorities: input accuracy, low/predictable inpu
 sense-maxer/
   crates/
     sense-math/          # degrees/count, eDPI, cm/360, inches/360 (no Bevy)
-    sense-types/         # MouseSample, InputCameraSample, Session, Configuration, IDs
+    sense-accel/         # InputProcessor trait, NoAcceleration, factory (M2)
+    sense-types/         # MouseSample, ProcessedMouseSample, Session, Configuration
     sense-telemetry/     # in-memory buffers + batched SQLite writer
     sense-input-win/     # WM_INPUT → timestamped queue
   src/                   # Bevy binary: scene, yaw camera, egui Validation Lab
@@ -135,7 +138,7 @@ The subclass proc handles each `WM_INPUT` by calling `sense_input_win::handle_wm
 Input collection and rendering run on independent cadences:
 
 ```
-RAW INPUT → timestamped queue → process every sample → camera yaw + telemetry → render
+RAW INPUT → timestamped queue → InputProcessor → process every sample → camera yaw + telemetry → render
 ```
 
 | Stream | Cadence | Purpose |
@@ -201,19 +204,39 @@ The `sense-telemetry` crate owns in-memory buffers and a batched writer. Raw eve
 
 ---
 
-## Acceleration (M1 Stub)
+## Input Processor (M2)
 
-M1 implements `NoAcceleration` (identity transform) behind an `InputProcessor` trait. Future curve types (Linear, Classic, Natural, Power, Custom/LUT) must not require changes to camera or telemetry core.
+M2 formalizes `InputProcessor` in `crates/sense-accel` as the session-scoped boundary between raw samples and yaw application.
 
-When acceleration is eventually enabled, telemetry keeps both raw and processed `dx`/`dy`. M1 stores raw; processed equals raw under `NoAcceleration`.
+```
+Raw MouseSample → compute dt_s from QPC timestamps → process(dx, dy, dt_s) → ProcessedMouseSample
+```
+
+| Component | Role |
+|-----------|------|
+| `ActiveInputProcessor` | NonSend resource; installed at Start Validation, frozen while Running |
+| `ProcessorTimingState` | Tracks last raw timestamp for `dt_s`; reset on Start / Reset Counters |
+| `create_processor(id)` | Factory; M2 only accepts `"none"` |
+| `processed_mouse_events` | SQLite table; per-row processor id/version/config |
+
+Rules:
+
+- `dt_s` from consecutive raw QPC timestamps only — never render-frame delta (required for M2.x velocity curves).
+- Yaw uses **processed** horizontal counts; under `none`, processed == raw.
+- Processor selected only at session start; HUD locks selection while Running.
+- Raw table unchanged; processed stored separately.
+
+Future curve types (Linear, Classic, Natural, Power, Custom/LUT) extend `sense-accel` without changing camera or telemetry core.
+
+See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline, `dt_s` convention, and manual checklist.
 
 ---
 
-## Explicitly Out of Scope (M1)
+## Explicitly Out of Scope (M1 + M2)
 
 - STATIC_CLICK / flick / tracking / target switching
 - Movement segmentation and flick phase classifier
-- Acceleration curve implementations beyond identity stub
+- Raw Accel / acceleration curve implementations beyond identity `none` (M2.x)
 - ML / Bayesian optimization / auto sensitivity search
 - Separate research UI process (Vue/Tauri/etc.)
 - CSV/JSON export tooling
@@ -229,4 +252,5 @@ When acceleration is eventually enabled, telemetry keeps both raw and processed 
 
 - [VALORANT_INPUT_MODEL.md](./VALORANT_INPUT_MODEL.md) — formulas, units, provenance
 - [TELEMETRY_SCHEMA.md](./TELEMETRY_SCHEMA.md) — tables, raw vs derived
+- [M2_PROCESSOR.md](./M2_PROCESSOR.md) — M2 processor framework and stop boundary
 - [EXPERIMENT_MODEL.md](./EXPERIMENT_MODEL.md) — Validation Lab flow, session/config IDs

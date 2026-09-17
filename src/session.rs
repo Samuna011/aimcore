@@ -19,7 +19,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.1.0";
+const EXPERIMENT_VERSION: &str = "0.2.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]

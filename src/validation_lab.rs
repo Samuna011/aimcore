@@ -126,11 +126,36 @@ pub fn draw_hud(
                 }
             ));
             ui.monospace(format!("DATABASE: {}", database_path().display()));
-            ui.monospace(format!(
-                "PROCESSOR: {} ({})",
-                active_processor.processor.id(),
-                active_processor.processor.version()
-            ));
+            if validation.is_running() {
+                ui.monospace(format!(
+                    "PROCESSOR: {}",
+                    active_processor.processor.id()
+                ));
+                ui.monospace(format!(
+                    "PROCESSOR VERSION: {}",
+                    active_processor.processor.version()
+                ));
+            } else {
+                ui.monospace(format!("PROCESSOR: {}", settings.processor_id));
+                let version = sense_accel::create_processor(&settings.processor_id)
+                    .map(|processor| processor.version().to_string())
+                    .unwrap_or_else(|_| "?".into());
+                ui.monospace(format!("PROCESSOR VERSION: {version}"));
+            }
+            ui.small("Under `none`, processed dx/dy equals raw (identity transform).");
+            ui.add_enabled_ui(!validation.is_running(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Processor (Idle only)");
+                    egui::ComboBox::from_id_salt("processor_id")
+                        .selected_text(&settings.processor_id)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut settings.processor_id, "none".into(), "none");
+                        });
+                });
+            });
+            if validation.is_running() {
+                ui.small("Processor locked while validation is running (snapshotted at Start).");
+            }
             if let Some(message) = &session.status_message {
                 ui.label(message);
             }

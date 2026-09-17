@@ -1,16 +1,18 @@
 # sense-maxer
 
-Windows-native Bevy VALORANT Input Validation Lab (M1).
+Windows-native Bevy VALORANT Input Validation Lab (M1 + M2).
 
-M1 proves the pipeline end-to-end:
+Pipeline:
 
 ```
-RAW MOUSE INPUT → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
+RAW MOUSE INPUT → INPUT PROCESSOR → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
 ```
 
-See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), and the M1 completion report.
+See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), M1 completion report, and **M2 processor framework** (`docs/M2_PROCESSOR.md`).
 
-**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync **ON** / FPS capped to refresh, WM_INPUT, QPC, NoAcceleration, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable). Uncapped VSync-off was a temporary M1 verification only.
+**M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync **ON** / FPS capped to refresh, WM_INPUT, QPC, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable). Uncapped VSync-off was a temporary M1 verification only.
+
+**M2 status:** COMPLETE / STOPPED. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`), session-scoped `none` processor (`experiment_version` `0.2.0`). **Stopped before Raw Accel / M2.x.**
 
 ## Requirements
 
@@ -75,8 +77,9 @@ Inspect after a run:
 ```bash
 sqlite3 data/sense_maxer.db ".tables"
 sqlite3 data/sense_maxer.db "SELECT session_id, error_percent, pipeline_suspect FROM validation_results;"
+sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_events GROUP BY processor_id;"
 ```
 
 ## Status
 
-M1 Validation Lab complete. See `docs/M1_COMPLETION_REPORT.md`. **Stopped** before STATIC_CLICK and later phases.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). **Stopped** before Raw Accel (M2.x) and STATIC_CLICK.

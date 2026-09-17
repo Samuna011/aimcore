@@ -1,6 +1,7 @@
-# Telemetry Schema (M1)
+# Telemetry Schema (M1 + M2)
 
 **Date:** 2026-09-17  
+**M2:** adds `processed_mouse_events`; `experiment_version` → `0.2.0` for new sessions  
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -17,7 +18,7 @@ Rules:
 
 - Never mutate raw samples after capture.
 - Derived metrics are written to separate columns/tables.
-- When acceleration is added later, store both raw and processed counts; M1 processed equals raw under `NoAcceleration`.
+- **M2:** store both raw and processed counts in separate tables; under `none` (`NoAcceleration`), processed equals raw.
 - Mouse, input-camera, and frame samples are buffered only while a validation session is running.
 
 ---
@@ -59,7 +60,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.1.0` |
+| `experiment_version` | TEXT | `0.2.0` (M2 processor framework) |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -95,7 +96,30 @@ Immutable raw input stream. Composite primary key per session.
 
 **Cadence:** one row per drained mouse sample while validation is running (same samples as `raw_mouse_events`).
 
+Yaw is computed from **processed** horizontal counts; under `none`, processed equals raw so M1 behavior is preserved.
+
 **Future:** `RenderCameraSample` (pose at render submit/present) will be a separate type/table — **not M1**.
+
+---
+
+### `processed_mouse_events` (M2)
+
+Processor output paired with each raw sample. Composite primary key per session.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `session_id` | TEXT FK | → `sessions.id` |
+| `sequence_number` | INTEGER | pairs with `raw_mouse_events` |
+| `timestamp_ns` | INTEGER | same as paired raw sample |
+| `processed_dx` | REAL | after `InputProcessor::process` |
+| `processed_dy` | REAL | after `InputProcessor::process` |
+| `processor_id` | TEXT | e.g. `none` |
+| `processor_version` | TEXT | e.g. `1.0.0` |
+| `processor_config_json` | TEXT | reproducible config blob, e.g. `{}` |
+
+**Cadence:** one row per drained mouse sample while validation is running (same sequence numbers as `raw_mouse_events`).
+
+Processor identity is stored **per row** so the transformation remains reproducible even if session config is incomplete.
 
 ---
 
@@ -153,9 +177,9 @@ Integrity counters distinguish input pipeline faults from sensitivity model mism
 
 ---
 
-## Future Tables (Non-M1)
+## Future Tables (Post-M2)
 
-Documented for later phases; **not implemented in M1**:
+Documented for later phases; **not implemented in M2**:
 
 | Table | Purpose |
 |-------|---------|
@@ -187,5 +211,6 @@ CSV/JSON export is also out of M1 scope; data must be queryable via SQLite.
 ## Related Documents
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — batching and input vs render streams
+- [M2_PROCESSOR.md](./M2_PROCESSOR.md) — processor pipeline, `dt_s` rules, manual checklist
 - [EXPERIMENT_MODEL.md](./EXPERIMENT_MODEL.md) — Validation Lab flow and signed net counts
 - [VALORANT_INPUT_MODEL.md](./VALORANT_INPUT_MODEL.md) — formulas for derived validation fields
