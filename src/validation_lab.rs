@@ -3,7 +3,9 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::{
-    camera_ctrl::{reset_camera, LiveInputStats, YawPitch},
+    camera_ctrl::{
+        reset_camera, ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch,
+    },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
@@ -22,7 +24,12 @@ pub fn draw_hud(
     integrity: Res<InputIntegrityTracker>,
     mut session: ResMut<ValidationSession>,
     look: Res<LookCapture>,
+    processor_runtime: (
+        NonSendMut<ActiveInputProcessor>,
+        ResMut<ProcessorTimingState>,
+    ),
 ) -> bevy::prelude::Result {
+    let (mut active_processor, mut timing) = processor_runtime;
     egui::Window::new("VALORANT VALIDATION LAB")
         .anchor(egui::Align2::LEFT_TOP, [12.0, 12.0])
         .resizable(false)
@@ -55,7 +62,12 @@ pub fn draw_hud(
                 }
                 if ui.button("Reset Counters").clicked() {
                     session.status_message =
-                        match reset_counters(&mut live_input, &mut buffers, &integrity) {
+                        match reset_counters(
+                            &mut live_input,
+                            &mut buffers,
+                            &integrity,
+                            &mut timing,
+                        ) {
                             Ok(()) => Some(
                                 "Live counters, telemetry buffers, and integrity reset for this attempt."
                                     .into(),
@@ -86,6 +98,8 @@ pub fn draw_hud(
                         &mut live_input,
                         &mut buffers,
                         &integrity,
+                        &mut active_processor,
+                        &mut timing,
                     ) {
                         session.status_message = Some(format!("Start failed: {error}"));
                     }
@@ -112,6 +126,11 @@ pub fn draw_hud(
                 }
             ));
             ui.monospace(format!("DATABASE: {}", database_path().display()));
+            ui.monospace(format!(
+                "PROCESSOR: {} ({})",
+                active_processor.processor.id(),
+                active_processor.processor.version()
+            ));
             if let Some(message) = &session.status_message {
                 ui.label(message);
             }

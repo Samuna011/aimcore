@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use sense_accel::{InputProcessor, NoAcceleration};
-use sense_types::{InputCameraSample, MouseSample};
+use sense_accel::{create_processor, InputProcessor};
+use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
@@ -24,12 +24,28 @@ pub struct LiveInputStats {
     pub samples_this_frame: usize,
 }
 
-#[derive(Resource)]
-pub struct InputProcessorState(pub NoAcceleration);
+pub struct ActiveInputProcessor {
+    pub processor: Box<dyn InputProcessor>,
+}
 
-impl Default for InputProcessorState {
+impl Default for ActiveInputProcessor {
     fn default() -> Self {
-        Self(NoAcceleration)
+        Self {
+            processor: create_processor("none").expect("built-in processor must exist"),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct ProcessorTimingState {
+    pub last_raw_timestamp_ns: Option<u64>,
+}
+
+impl ProcessorTimingState {
+    fn dt_s_for(&mut self, timestamp_ns: u64) -> f64 {
+        let dt_s = sense_accel::dt_s_from_timestamps(self.last_raw_timestamp_ns, timestamp_ns);
+        self.last_raw_timestamp_ns = Some(timestamp_ns);
+        dt_s
     }
 }
 
@@ -37,12 +53,12 @@ pub fn drain_mouse_to_camera(
     queue: Res<ArcMouseQueue>,
     mut camera: Single<&mut YawPitch, With<Camera3d>>,
     settings: Res<ExperimentSettings>,
-    mut processor: ResMut<InputProcessorState>,
+    mut active_processor: NonSendMut<ActiveInputProcessor>,
+    mut timing: ResMut<ProcessorTimingState>,
     mut live: ResMut<LiveInputStats>,
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
-    time: Res<Time>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
@@ -52,17 +68,16 @@ pub fn drain_mouse_to_camera(
     if !look.enabled {
         return;
     }
-    let sample_dt_s = if samples.is_empty() {
-        0.0
-    } else {
-        time.delta_secs_f64() / samples.len() as f64
-    };
     let accumulate_stats = validation.is_running();
     for sample in samples {
-        let (processed_dx, _) =
-            processor
-                .0
-                .process(sample.dx as f64, sample.dy as f64, sample_dt_s);
+        let dt_s = timing.dt_s_for(sample.timestamp_ns);
+        let processor_id = active_processor.processor.id().to_string();
+        let processor_version = active_processor.processor.version().to_string();
+        let processor_config_json = active_processor.processor.config_json();
+        let (processed_dx, processed_dy) =
+            active_processor
+                .processor
+                .process(sample.dx as f64, sample.dy as f64, dt_s);
         let camera_sample = apply_sample(
             &sample,
             processed_dx,
@@ -72,6 +87,15 @@ pub fn drain_mouse_to_camera(
             accumulate_stats,
         );
         if accumulate_stats {
+            buffers.0.processed.push(ProcessedMouseSample {
+                timestamp_ns: sample.timestamp_ns,
+                sequence_number: sample.sequence_number,
+                processed_dx,
+                processed_dy,
+                processor_id,
+                processor_version,
+                processor_config_json,
+            });
             buffers.0.mouse.push(sample);
             buffers.0.input_camera.push(camera_sample);
         }
@@ -133,6 +157,15 @@ fn apply_sample(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn processor_timing_uses_consecutive_qpc_timestamps_across_drains() {
+        let mut timing = ProcessorTimingState::default();
+
+        assert_eq!(timing.dt_s_for(1_000_000_000), 0.0);
+        assert!((timing.dt_s_for(1_004_000_000) - 0.004).abs() < f64::EPSILON);
+        assert_eq!(timing.last_raw_timestamp_ns, Some(1_004_000_000));
+    }
 
     #[test]
     fn yaw_updates_and_pitch_remains_frozen() {

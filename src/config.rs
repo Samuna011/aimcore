@@ -21,6 +21,7 @@ pub struct ExperimentSettings {
     pub dpi: f64,
     pub sensitivity: f64,
     pub fov_degrees_h: f64,
+    pub processor_id: String,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,7 @@ impl Default for ExperimentSettings {
             dpi: 3200.0,
             sensitivity: 0.09,
             fov_degrees_h: 103.0,
+            processor_id: "none".into(),
         }
     }
 }
@@ -70,10 +72,15 @@ impl ExperimentSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::ValidationState;
+    use super::{ExperimentSettings, ValidationState};
 
     #[test]
     fn validation_starts_idle() {
         assert_eq!(ValidationState::default(), ValidationState::Idle);
+    }
+
+    #[test]
+    fn processor_defaults_to_none() {
+        assert_eq!(ExperimentSettings::default().processor_id, "none");
     }
 }

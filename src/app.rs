@@ -8,7 +8,8 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
     camera_ctrl::{
-        apply_yaw_transform, drain_mouse_to_camera, InputProcessorState, LiveInputStats,
+        apply_yaw_transform, drain_mouse_to_camera, ActiveInputProcessor, LiveInputStats,
+        ProcessorTimingState,
     },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::{record_frame_telemetry, LiveFrameStats},
@@ -21,9 +22,10 @@ use crate::{
 pub fn run() {
     App::new()
         .insert_resource(ExperimentSettings::default())
+        .insert_non_send(ActiveInputProcessor::default())
         .init_resource::<ValidationState>()
         .init_resource::<TelemetryBuffers>()
-        .init_resource::<InputProcessorState>()
+        .init_resource::<ProcessorTimingState>()
         .init_resource::<LiveInputStats>()
         .init_resource::<LiveFrameStats>()
         .init_resource::<ValidationSession>()

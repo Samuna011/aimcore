@@ -12,7 +12,7 @@ use sense_types::{
 };
 
 use crate::{
-    camera_ctrl::LiveInputStats,
+    camera_ctrl::{ActiveInputProcessor, LiveInputStats, ProcessorTimingState},
     config::{ExperimentSettings, TelemetryBuffers, ValidationState},
     input_plugin::InputIntegrityTracker,
 };
@@ -74,11 +74,17 @@ pub fn start_validation(
     live: &mut LiveInputStats,
     buffers: &mut TelemetryBuffers,
     integrity: &InputIntegrityTracker,
+    active_processor: &mut ActiveInputProcessor,
+    timing: &mut ProcessorTimingState,
 ) -> Result<(), String> {
     if validation.is_running() {
         return Err("A validation session is already running.".into());
     }
 
+    let processor = sense_accel::create_processor(&settings.processor_id)?;
+    let processor_id = processor.id().to_string();
+    let processor_version = processor.version().to_string();
+    let processor_config_json = processor.config_json();
     let db = open_database()?;
     let now_ms = unix_time_ms()?;
     let date = utc_date_from_unix_ms(now_ms);
@@ -107,10 +113,10 @@ pub fn start_validation(
         },
         accel: AccelerationConfig {
             enabled: false,
-            model: "none".into(),
-            processor_id: "none".into(),
-            processor_version: "1.0.0".into(),
-            processor_config_json: "{}".into(),
+            model: processor_id.clone(),
+            processor_id,
+            processor_version,
+            processor_config_json,
         },
         polling_rate_hz: None,
     };
@@ -128,7 +134,8 @@ pub fn start_validation(
     db.upsert_configuration(&configuration)?;
     db.insert_session_start(&record)?;
 
-    reset_counters(live, buffers, integrity)?;
+    reset_counters(live, buffers, integrity, timing)?;
+    active_processor.processor = processor;
     session.raw_input_read_failures_at_start = sense_input_win::raw_input_read_failures();
     session.active_session_id = Some(session_id.clone());
     session.last_result = None;
@@ -181,6 +188,7 @@ pub fn reset_counters(
     live: &mut LiveInputStats,
     buffers: &mut TelemetryBuffers,
     integrity: &InputIntegrityTracker,
+    timing: &mut ProcessorTimingState,
 ) -> Result<(), String> {
     live.net_dx = 0;
     live.net_dy = 0;
@@ -188,6 +196,7 @@ pub fn reset_counters(
     live.total_yaw_delta_deg = 0.0;
     live.samples_this_frame = 0;
     buffers.0.clear();
+    timing.last_raw_timestamp_ns = None;
     integrity
         .0
         .lock()
@@ -291,7 +300,9 @@ mod tests {
     use sense_types::{InputIntegrityReport, MouseSample};
 
     use crate::{
-        camera_ctrl::LiveInputStats, config::TelemetryBuffers, input_plugin::InputIntegrityTracker,
+        camera_ctrl::{LiveInputStats, ProcessorTimingState},
+        config::TelemetryBuffers,
+        input_plugin::InputIntegrityTracker,
     };
 
     use super::{
@@ -349,13 +360,17 @@ mod tests {
         });
         let mut live = LiveInputStats::default();
         let mut buffers = TelemetryBuffers::default();
+        let mut timing = ProcessorTimingState {
+            last_raw_timestamp_ns: Some(42),
+        };
 
-        reset_counters(&mut live, &mut buffers, &integrity).unwrap();
+        reset_counters(&mut live, &mut buffers, &integrity, &mut timing).unwrap();
 
         assert_eq!(
             integrity.0.lock().unwrap().report(),
             IntegrityTracker::default().report()
         );
+        assert_eq!(timing.last_raw_timestamp_ns, None);
     }
 
     #[test]
