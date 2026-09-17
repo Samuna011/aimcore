@@ -1,8 +1,8 @@
 # M2 Input Processor Framework
 
 **Date:** 2026-09-17  
-**Experiment version:** `0.2.0`  
-**Status:** COMPLETE / STOPPED — no Raw Accel math (M2.x is a separate cycle)
+**Experiment version:** `0.2.0` (`none` only); `0.3.0` when `rawaccel_linear` is selected  
+**Status:** M2 COMPLETE; M2.x Phase 1 (`rawaccel_linear`) COMPLETE / STOPPED
 
 ---
 
@@ -16,13 +16,13 @@ WM_INPUT → Raw sample → InputProcessor → Processed dx/dy → Yaw → Camer
          raw_mouse_events            processed_mouse_events
 ```
 
-Under the only M2 processor (`none` / `NoAcceleration`), processed counts equal raw counts and validation behavior matches M1.
+Under `none` / `NoAcceleration`, processed counts equal raw counts and validation behavior matches M1. M2.x Phase 1 adds `rawaccel_linear` — see [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md).
 
 ---
 
 ## Pipeline
 
-1. **Idle:** HUD shows selected `processor_id` (M2: only `"none"`). DPI/sensitivity editable. Processor selection editable only while Idle.
+1. **Idle:** HUD shows selected `processor_id` (`"none"` or `"rawaccel_linear"`). DPI/sensitivity editable. Processor selection and `rawaccel_linear` config editable only while Idle.
 2. **Start Validation:** `create_processor(selected_id)`; snapshot id/version/config into `ConfigurationRecord`; install `ActiveInputProcessor`; reset timing and buffers.
 3. **Running:** Drain all queued raw samples. For each sample:
    - Compute `dt_s` from consecutive raw QPC timestamps (see below).
@@ -59,13 +59,14 @@ Implementation: `sense_accel::dt_s_from_timestamps` in `crates/sense-accel`.
 
 ---
 
-## Processors (M2)
+## Processors
 
 | id | version | config | transform |
 |----|---------|--------|-----------|
 | `none` | `1.0.0` | `{}` | Identity: `(dx, dy)` unchanged |
+| `rawaccel_linear` | `1.0.0` | `{"acceleration", "sensitivity_multiplier"}` | Raw Accel Linear (Legacy / Sensitivity) — see [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md) |
 
-Factory: `sense_accel::create_processor(id)` — unknown ids fail at session start.
+Factory: `sense_accel::create_processor(id, acceleration, sensitivity_multiplier)` — `acceleration` / `sensitivity_multiplier` ignored for `"none"`; unknown ids fail at session start.
 
 Crate layout: `crates/sense-accel` (trait + registry); types in `sense-types`; wiring in `src/camera_ctrl.rs` and `src/session.rs`.
 
@@ -100,9 +101,10 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, processor_version, processed_d
 
 ---
 
-## Explicitly Out of Scope (M2)
+## Explicitly Out of Scope (M2 + M2.x Phase 1)
 
-- Raw Accel / Linear / Classic / Natural / Power / LUT curves
+- Additional Raw Accel modes (Natural, Classic general, Gain, Power, LUT, …)
+- Driver-side comparison against real Raw Accel
 - Mid-session processor hot-swap
 - Pitch enablement
 - Aim tasks (STATIC_CLICK, etc.)
@@ -110,13 +112,15 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, processor_version, processed_d
 - Changing VSync back to uncapped
 - Silent yaw-constant compensation
 
-**STOP:** Do not implement M2.x Raw Accel without a new design + approval cycle.
+**STOP:** M2.x Phase 1 (`rawaccel_linear`) is complete. Do not implement further Raw Accel modes, Gain, caps/offsets, LUT infrastructure, or driver comparison without a new design + approval cycle. See [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md).
 
 ---
 
 ## Related Documents
 
-- [2026-09-17-m2-input-processor-design.md](./superpowers/specs/2026-09-17-m2-input-processor-design.md) — full design spec
+- [M2X_RAWACCEL_LINEAR.md](./M2X_RAWACCEL_LINEAR.md) — M2.x Phase 1 Raw Accel Linear provenance and stop gate
+- [2026-09-17-m2-input-processor-design.md](./superpowers/specs/2026-09-17-m2-input-processor-design.md) — full M2 design spec
+- [2026-09-17-m2x-rawaccel-linear-design.md](./superpowers/specs/2026-09-17-m2x-rawaccel-linear-design.md) — M2.x Phase 1 design spec
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — Bevy wiring and crate layout
 - [TELEMETRY_SCHEMA.md](./TELEMETRY_SCHEMA.md) — `processed_mouse_events` schema
 - [BASELINE.md](./BASELINE.md) — locked VSync / WM_INPUT / pitch settings

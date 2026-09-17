@@ -8,11 +8,13 @@ Pipeline:
 RAW MOUSE INPUT → INPUT PROCESSOR → SENSITIVITY MODEL → CAMERA YAW → NATIVE 3D RENDER → TELEMETRY → SQLITE
 ```
 
-See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), M1 completion report, and **M2 processor framework** (`docs/M2_PROCESSOR.md`).
+See `docs/` for architecture, input model, telemetry schema, experiment design, the **locked baseline** (`docs/BASELINE.md`), M1 completion report, **M2 processor framework** (`docs/M2_PROCESSOR.md`), and **M2.x Raw Accel Linear** (`docs/M2X_RAWACCEL_LINEAR.md`).
 
 **M1 status:** COMPLETE / STOPPED. Experimental baseline locked (VSync **ON** / FPS capped to refresh, WM_INPUT, QPC, pitch disabled, yaw 0.07 uncertain, HFOV 103°, DPI/sens configurable). Uncapped VSync-off was a temporary M1 verification only.
 
-**M2 status:** COMPLETE / STOPPED. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`), session-scoped `none` processor (`experiment_version` `0.2.0`). **Stopped before Raw Accel / M2.x.**
+**M2 status:** COMPLETE. InputProcessor framework with dual telemetry (raw + `processed_mouse_events`).
+
+**M2.x status:** Phase 1 COMPLETE / STOPPED. Processors: `none` (`experiment_version` `0.2.0`) and `rawaccel_linear` (`0.3.0`). Documents mathematical behavior only — not actual-driver comparison. **Stopped** before Natural/Classic/Gain/LUT/driver comparison.
 
 ## Requirements
 
@@ -82,4 +84,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). **Stopped** before Raw Accel (M2.x) and STATIC_CLICK.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1 (`rawaccel_linear`) complete (`docs/M2X_RAWACCEL_LINEAR.md`). **Stopped** before further Raw Accel modes and STATIC_CLICK.
