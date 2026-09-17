@@ -253,17 +253,12 @@ fn open_database() -> Result<TelemetryDb, String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let db = TelemetryDb::open(Path::new(&path))?;
-    let schema_exists: bool = db
-        .connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    if !schema_exists {
-        db.migrate()?;
-    }
+    // Always migrate: M1 tables are created only when missing; M2
+    // `processed_mouse_events` uses CREATE IF NOT EXISTS so existing M1
+    // databases (e.g. data/sense_maxer.db from before M2) still get upgraded.
+    // Skipping migrate when sessions already exists left End Validation failing
+    // with "no such table: processed_mouse_events" and the UI stuck in Running.
+    db.migrate()?;
     Ok(db)
 }
 

@@ -163,3 +163,107 @@ fn sqlite_roundtrip_flushes_all_sample_types() {
         .unwrap();
     assert_eq!(stored_end_unix_ms, end_unix_ms);
 }
+
+#[test]
+fn migrate_upgrades_existing_m1_database_with_processed_table() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    // Simulate a pre-M2 database: M1 tables only, no processed_mouse_events.
+    db.connection
+        .execute_batch(
+            r#"
+CREATE TABLE configurations (
+  id TEXT PRIMARY KEY,
+  dpi REAL NOT NULL,
+  sensitivity REAL NOT NULL,
+  edpi REAL NOT NULL,
+  yaw_deg_per_count_at_sens_1 REAL NOT NULL,
+  fov_axis TEXT NOT NULL,
+  fov_degrees REAL NOT NULL,
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  refresh_hz REAL NOT NULL,
+  acceleration_enabled INTEGER NOT NULL,
+  acceleration_model TEXT NOT NULL,
+  polling_rate_hz REAL,
+  snapshot_json TEXT NOT NULL
+);
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  configuration_id TEXT NOT NULL,
+  app_version TEXT NOT NULL,
+  experiment_id TEXT NOT NULL,
+  experiment_version TEXT NOT NULL,
+  random_seed INTEGER NOT NULL,
+  start_unix_ms INTEGER NOT NULL,
+  end_unix_ms INTEGER,
+  FOREIGN KEY(configuration_id) REFERENCES configurations(id)
+);
+CREATE TABLE raw_mouse_events (
+  session_id TEXT NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  dx INTEGER NOT NULL,
+  dy INTEGER NOT NULL,
+  buttons INTEGER NOT NULL,
+  PRIMARY KEY(session_id, sequence_number)
+);
+CREATE TABLE input_camera_samples (
+  session_id TEXT NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  yaw_deg REAL NOT NULL,
+  pitch_deg REAL NOT NULL,
+  PRIMARY KEY(session_id, sequence_number)
+);
+CREATE TABLE frame_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  frame_time_s REAL NOT NULL,
+  fps REAL NOT NULL
+);
+CREATE TABLE validation_results (
+  session_id TEXT PRIMARY KEY,
+  expected_counts REAL NOT NULL,
+  observed_net_counts REAL NOT NULL,
+  observed_abs_path_counts REAL NOT NULL,
+  expected_degrees REAL NOT NULL,
+  observed_degrees REAL NOT NULL,
+  count_difference REAL NOT NULL,
+  error_percent REAL NOT NULL,
+  samples_received INTEGER NOT NULL,
+  sequence_gaps INTEGER NOT NULL,
+  duplicate_sequences INTEGER NOT NULL,
+  out_of_order_samples INTEGER NOT NULL,
+  timestamp_regressions INTEGER NOT NULL,
+  pipeline_suspect INTEGER NOT NULL
+);
+"#,
+        )
+        .unwrap();
+
+    let before: bool = db
+        .connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='processed_mouse_events')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!before, "fixture must start without processed_mouse_events");
+
+    db.migrate().unwrap();
+
+    let after: bool = db
+        .connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='processed_mouse_events')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(after, "migrate must add processed_mouse_events on existing M1 DBs");
+
+    // Second migrate is idempotent.
+    db.migrate().unwrap();
+}
