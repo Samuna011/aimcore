@@ -1,7 +1,7 @@
 # Telemetry Schema (M1 + M2)
 
 **Date:** 2026-09-17  
-**M2:** adds `processed_mouse_events`; all new sessions use `experiment_version` `0.3.0`
+**M2:** adds `processed_mouse_events`; all new sessions use `experiment_version` `0.4.0`
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -60,7 +60,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.3.0` for all new sessions, regardless of processor |
+| `experiment_version` | TEXT | `0.4.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -114,7 +114,7 @@ Processor output paired with each raw sample. Composite primary key per session.
 | `processed_dx` | REAL | after `InputProcessor::process` |
 | `processed_dy` | REAL | after `InputProcessor::process` |
 | `processor_id` | TEXT | e.g. `none` |
-| `processor_version` | TEXT | e.g. `1.0.0` |
+| `processor_version` | TEXT | e.g. `1.1.0` |
 | `processor_config_json` | TEXT | reproducible config blob, e.g. `{}` |
 
 **Cadence:** one row per drained mouse sample while validation is running (same sequence numbers as `raw_mouse_events`).

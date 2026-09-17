@@ -43,6 +43,44 @@ pub struct RawAccelLinearConfig {
 }
 
 impl RawAccelLinearConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("acceleration", self.acceleration),
+            ("sensitivity_multiplier", self.sensitivity_multiplier),
+            ("input_offset", self.input_offset),
+            ("cap_x", self.cap_x),
+            ("cap_y", self.cap_y),
+        ] {
+            if !value.is_finite() {
+                return Err(format!("{name} must be finite"));
+            }
+        }
+
+        if self.input_offset < 0.0 {
+            return Err("input_offset must be greater than or equal to 0".into());
+        }
+
+        match self.cap_mode {
+            CapMode::Io if self.cap_x <= self.input_offset => {
+                return Err("io cap_x must be greater than input_offset".into());
+            }
+            CapMode::In if self.cap_x <= 0.0 => {
+                return Err("in cap_x must be greater than 0".into());
+            }
+            CapMode::Out
+                if self.gain
+                    && self.cap_y > 0.0
+                    && self.cap_y != 1.0
+                    && self.acceleration == 0.0 =>
+            {
+                return Err("gain out acceleration must be nonzero when cap_y is active".into());
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// Phase 1 Guide / verification: Sensitivity, inactive output cap.
     pub fn phase1_sensitivity(acceleration: f64, sensitivity_multiplier: f64) -> Self {
         Self {
@@ -132,7 +170,12 @@ pub fn create_processor(
 ) -> Result<Box<dyn InputProcessor>, String> {
     match id {
         "none" => Ok(Box::new(NoAcceleration)),
-        "rawaccel_linear" => Ok(Box::new(RawAccelLinear::new(config.clone()))),
+        "rawaccel_linear" => {
+            config
+                .validate()
+                .map_err(|error| format!("invalid rawaccel_linear config: {error}"))?;
+            Ok(Box::new(RawAccelLinear::new(config.clone())))
+        }
         _ => Err(format!("unknown processor id: {id}")),
     }
 }

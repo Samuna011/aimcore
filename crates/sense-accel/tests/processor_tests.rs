@@ -50,6 +50,33 @@ fn factory_rawaccel_linear_v110_gain_default_process_finite() {
 }
 
 #[test]
+fn factory_rejects_io_with_zero_cap_x() {
+    let config = RawAccelLinearConfig {
+        cap_mode: CapMode::Io,
+        ..RawAccelLinearConfig::trainer_default()
+    };
+
+    let error = create_processor("rawaccel_linear", &config)
+        .err()
+        .expect("io cap_x=0 must be rejected");
+    assert!(error.contains("cap_x must be greater than input_offset"));
+}
+
+#[test]
+fn factory_accepts_valid_io_and_processes_finite() {
+    let config = RawAccelLinearConfig {
+        cap_mode: CapMode::Io,
+        cap_x: 40.0,
+        cap_y: 2.0,
+        ..RawAccelLinearConfig::trainer_default()
+    };
+
+    let mut p = create_processor("rawaccel_linear", &config).unwrap();
+    let (ox, oy) = p.process(30.0, 40.0, 0.001);
+    assert!(ox.is_finite() && oy.is_finite());
+}
+
+#[test]
 fn rawaccel_linear_config_json_includes_all_fields() {
     let p = RawAccelLinear::new(RawAccelLinearConfig::trainer_default());
     assert_eq!(
