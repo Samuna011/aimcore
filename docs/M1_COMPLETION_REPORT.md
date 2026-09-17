@@ -152,27 +152,35 @@ Manual (operator): 360° horizontal rotation in Validation Lab; confirm HUD resu
 
 ## 11. Results of 360° Validation
 
-**Operator to complete on first hardware run.**
-
-After running Start → one continuous horizontal 360° (single direction, no reversing) → End Validation, paste:
+**Date recorded:** 2026-09-17  
+**Operator:** developer (first subject)  
+**Method:** human-performed continuous horizontal 360° (single direction)
 
 | Field | Value |
 |-------|-------|
-| Session ID | |
-| Config ID | |
-| DPI / Sensitivity / eDPI | |
-| Expected counts | |
-| Observed net counts | |
-| Observed abs path counts | |
-| Error % | |
-| Pipeline suspect | |
-| Notes (mouse, VALORANT comparison if any) | |
+| DPI / Sensitivity / eDPI | 1600 / 0.175 / 280 (default) |
+| Expected counts | 29387.755102 |
+| Observed net counts | +29380.000000 |
+| Observed abs path counts | 29422.000000 |
+| Expected degrees | 360.000000 |
+| Observed degrees | +359.905000 |
+| Count difference | −7.755102 |
+| Error % | −0.026389% |
+| Samples received | 4836 |
+| Sequence gaps | 0 |
+| Duplicate sequences | 0 |
+| Out of order | 0 |
+| Timestamp regressions | 0 |
+| Pipeline suspect | **false** |
 
-Query example:
+### Interpretation
 
-```bash
-sqlite3 data/sense_maxer.db "SELECT * FROM validation_results ORDER BY session_id DESC LIMIT 1;"
-```
+- **Pipeline health:** Integrity counters are all zero and `pipeline_suspect` is false. This run does **not** indicate an input-pipeline fault (no gaps, duplicates, OOO, or timestamp regressions).
+- **Angular model:** Observed ≈ 359.905° vs expected 360°. Net shortfall ≈ **7.8 counts** (~0.026%). That is consistent with **human aiming / stopping error** on a freehand 360°, not with a broken `0.07` yaw formula (a wrong yaw constant would typically produce a much larger systematic bias).
+- **Abs path vs net:** Abs path (29422) > net (29380) by 42 counts implies a small amount of reverse motion or micro-corrections during the sweep. Validation correctly uses **signed net** for the discrepancy; abs path is telemetry only.
+- **Do not “fix” the model from this:** Per project rules, do not silently compensate the formula to erase a human 360° miss. Treat this as evidence that the instrument is measuring and reporting, not as a calibration target to zero out.
+
+**Residual uncertainty:** A human 360° cannot prove bit-exact VALORANT equivalence. Stronger confirmation would need a mechanical/reference rotation or a side-by-side count comparison against VALORANT under identical DPI/sens — still separate from this healthy first instrument run.
 
 ---
 
@@ -228,4 +236,6 @@ sqlite3 data/sense_maxer.db "SELECT * FROM validation_results ORDER BY session_i
 
 ## Stop Checkpoint
 
-M1 Validation Lab is complete. **Do not proceed** to STATIC_CLICK, movement segmentation, ML optimization, or export tooling until operator completes section 11 and explicitly approves the next phase.
+M1 Validation Lab is functionally validated on hardware with a clean integrity report and ~0.026% human 360° error. **Do not proceed** to STATIC_CLICK, movement segmentation, ML optimization, or export tooling until you explicitly approve the next phase.
+
+The `0.07` yaw constant remains **UNCERTAIN** pending stronger VALORANT-side confirmation; this run does not justify changing it.
