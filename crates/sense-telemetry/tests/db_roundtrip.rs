@@ -2,9 +2,9 @@ use std::path::Path;
 
 use sense_telemetry::{SessionBuffers, TelemetryDb};
 use sense_types::{
-    AccelerationConfig, ConfigurationRecord, DisplayConfig, FovAxis, FrameSample,
-    InputCameraSample, InputIntegrityReport, MouseSample, ProcessedMouseSample, SensitivityConfig,
-    SessionRecord, ValidationResult,
+    AccelerationConfig, AimShotRecord, AimTrialRecord, ConfigurationRecord, DisplayConfig,
+    FovAxis, FrameSample, InputCameraSample, InputIntegrityReport, MouseSample,
+    ProcessedMouseSample, SensitivityConfig, SessionRecord, ValidationResult,
 };
 
 #[test]
@@ -266,4 +266,156 @@ CREATE TABLE validation_results (
 
     // Second migrate is idempotent.
     db.migrate().unwrap();
+}
+
+fn sample_aim_trial(status: &str) -> AimTrialRecord {
+    AimTrialRecord {
+        id: String::new(),
+        app_version: "0.7.0".into(),
+        experiment_id: "aim_lab".into(),
+        experiment_version: "0.7.0".into(),
+        trial_type: "STATIC_CLICK".into(),
+        status: status.into(),
+        processor_id: "none".into(),
+        processor_version: "1.0.0".into(),
+        processor_config_json: "{}".into(),
+        dpi: 800.0,
+        sensitivity: 0.35,
+        polling_rate_hz: 1_000.0,
+        fov_degrees_h: 103.0,
+        task_config_json: r#"{"hits_required":5,"target_radius":0.25}"#.into(),
+        metrics_json: "{}".into(),
+        start_unix_ms: 1_700_000_000_000,
+        end_unix_ms: 1_700_000_005_000,
+        start_timestamp_ns: 1_000_000_000,
+        end_timestamp_ns: 6_000_000_000,
+        duration_secs: 5.0,
+        hits: 5,
+        shots: 7,
+        misses: 2,
+        score_secs: 4.2,
+        accuracy: 5.0 / 7.0,
+    }
+}
+
+fn sample_aim_shots() -> Vec<AimShotRecord> {
+    vec![
+        AimShotRecord {
+            shot_index: 0,
+            timestamp_ns: 1_100_000_000,
+            hit: true,
+            yaw_deg: 0.1,
+            pitch_deg: -0.2,
+            target_x: 1.0,
+            target_y: 2.0,
+            target_z: 10.0,
+            target_radius: 0.25,
+        },
+        AimShotRecord {
+            shot_index: 1,
+            timestamp_ns: 1_200_000_000,
+            hit: false,
+            yaw_deg: 0.3,
+            pitch_deg: -0.1,
+            target_x: -1.0,
+            target_y: 1.5,
+            target_z: 10.0,
+            target_radius: 0.25,
+        },
+    ]
+}
+
+#[test]
+fn insert_completed_aim_trial_roundtrip_and_sequence() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let shots = sample_aim_shots();
+    let trial_id = db
+        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .unwrap();
+    assert_eq!(trial_id, "aim_20260918_000001");
+
+    let (hits, shots_count, misses, score_secs, accuracy, trial_type, status, experiment_version): (
+        u32,
+        u32,
+        u32,
+        f64,
+        f64,
+        String,
+        String,
+        String,
+    ) = db
+        .connection
+        .query_row(
+            "SELECT hits, shots, misses, score_secs, accuracy, trial_type, status, experiment_version
+             FROM aim_trials WHERE id = ?1",
+            [&trial_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as u32,
+                    row.get::<_, i64>(1)? as u32,
+                    row.get::<_, i64>(2)? as u32,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(hits, trial.hits);
+    assert_eq!(shots_count, trial.shots);
+    assert_eq!(misses, trial.misses);
+    assert!((score_secs - trial.score_secs).abs() < f64::EPSILON);
+    assert!((accuracy - trial.accuracy).abs() < f64::EPSILON);
+    assert_eq!(trial_type, trial.trial_type);
+    assert_eq!(status, "completed");
+    assert_eq!(experiment_version, trial.experiment_version);
+
+    let mut statement = db
+        .connection
+        .prepare(
+            "SELECT shot_index, hit FROM aim_shots WHERE trial_id = ?1 ORDER BY shot_index",
+        )
+        .unwrap();
+    let rows: Vec<(u32, bool)> = statement
+        .query_map([&trial_id], |row| {
+            Ok((row.get::<_, i64>(0)? as u32, row.get::<_, i64>(1)? != 0))
+        })
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0], (0, true));
+    assert_eq!(rows[1], (1, false));
+
+    let second_id = db
+        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .unwrap();
+    assert_eq!(second_id, "aim_20260918_000002");
+}
+
+#[test]
+fn insert_completed_aim_trial_rejects_non_completed_status() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("armed");
+    let shots = sample_aim_shots();
+    let error = db
+        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .unwrap_err();
+    assert!(
+        error.contains("completed"),
+        "expected status guard error, got: {error}"
+    );
+
+    let count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_trials", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
 }

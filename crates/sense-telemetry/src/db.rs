@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection};
-use sense_types::{ConfigurationRecord, FovAxis, SessionRecord, ValidationResult};
+use sense_types::{
+    AimShotRecord, AimTrialRecord, ConfigurationRecord, FovAxis, SessionRecord, ValidationResult,
+};
 
 use crate::SessionBuffers;
 
@@ -127,6 +129,51 @@ CREATE TABLE IF NOT EXISTS processed_mouse_events (
 );
 CREATE INDEX IF NOT EXISTS idx_processed_mouse_session
   ON processed_mouse_events(session_id);
+
+CREATE TABLE IF NOT EXISTS aim_trials (
+  id TEXT PRIMARY KEY,
+  app_version TEXT NOT NULL,
+  experiment_id TEXT NOT NULL,
+  experiment_version TEXT NOT NULL,
+  trial_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  processor_id TEXT NOT NULL,
+  processor_version TEXT NOT NULL,
+  processor_config_json TEXT NOT NULL,
+  dpi REAL NOT NULL,
+  sensitivity REAL NOT NULL,
+  polling_rate_hz REAL NOT NULL,
+  fov_degrees_h REAL NOT NULL,
+  task_config_json TEXT NOT NULL,
+  metrics_json TEXT NOT NULL,
+  start_unix_ms INTEGER NOT NULL,
+  end_unix_ms INTEGER NOT NULL,
+  start_timestamp_ns INTEGER NOT NULL,
+  end_timestamp_ns INTEGER NOT NULL,
+  duration_secs REAL NOT NULL,
+  hits INTEGER NOT NULL,
+  shots INTEGER NOT NULL,
+  misses INTEGER NOT NULL,
+  score_secs REAL NOT NULL,
+  accuracy REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aim_shots (
+  trial_id TEXT NOT NULL,
+  shot_index INTEGER NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  hit INTEGER NOT NULL,
+  yaw_deg REAL NOT NULL,
+  pitch_deg REAL NOT NULL,
+  target_x REAL NOT NULL,
+  target_y REAL NOT NULL,
+  target_z REAL NOT NULL,
+  target_radius REAL NOT NULL,
+  PRIMARY KEY(trial_id, shot_index),
+  FOREIGN KEY(trial_id) REFERENCES aim_trials(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aim_shots_trial ON aim_shots(trial_id);
 "#,
             )
             .map_err(|error| error.to_string())
@@ -254,6 +301,126 @@ INSERT INTO sessions (
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())
     }
+
+    /// Allocates `aim_{date}_{seq:06}` inside the txn (max suffix + 1).
+    /// Returns allocated trial id. Rolls back entirely on any error / PK conflict.
+    pub fn insert_completed_aim_trial(
+        &self,
+        utc_date: &str,
+        trial: &AimTrialRecord,
+        shots: &[AimShotRecord],
+    ) -> Result<String, String> {
+        if trial.status != "completed" {
+            return Err(format!(
+                "aim trial status must be \"completed\", got \"{}\"",
+                trial.status
+            ));
+        }
+
+        let prefix = format!("aim_{utc_date}_");
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        let sequence = next_aim_sequence(&transaction, &prefix)?;
+        let trial_id = format!("{prefix}{sequence:06}");
+
+        transaction
+            .execute(
+                r#"
+INSERT INTO aim_trials (
+  id, app_version, experiment_id, experiment_version, trial_type, status,
+  processor_id, processor_version, processor_config_json, dpi, sensitivity,
+  polling_rate_hz, fov_degrees_h, task_config_json, metrics_json,
+  start_unix_ms, end_unix_ms, start_timestamp_ns, end_timestamp_ns,
+  duration_secs, hits, shots, misses, score_secs, accuracy
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+                params![
+                    trial_id,
+                    trial.app_version,
+                    trial.experiment_id,
+                    trial.experiment_version,
+                    trial.trial_type,
+                    trial.status,
+                    trial.processor_id,
+                    trial.processor_version,
+                    trial.processor_config_json,
+                    trial.dpi,
+                    trial.sensitivity,
+                    trial.polling_rate_hz,
+                    trial.fov_degrees_h,
+                    trial.task_config_json,
+                    trial.metrics_json,
+                    trial.start_unix_ms,
+                    trial.end_unix_ms,
+                    as_i64(trial.start_timestamp_ns, "start timestamp ns")?,
+                    as_i64(trial.end_timestamp_ns, "end timestamp ns")?,
+                    trial.duration_secs,
+                    as_i64(u64::from(trial.hits), "hits")?,
+                    as_i64(u64::from(trial.shots), "shots")?,
+                    as_i64(u64::from(trial.misses), "misses")?,
+                    trial.score_secs,
+                    trial.accuracy,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+INSERT INTO aim_shots (
+  trial_id, shot_index, timestamp_ns, hit, yaw_deg, pitch_deg,
+  target_x, target_y, target_z, target_radius
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+                )
+                .map_err(|error| error.to_string())?;
+            for shot in shots {
+                statement
+                    .execute(params![
+                        trial_id,
+                        as_i64(u64::from(shot.shot_index), "shot index")?,
+                        as_i64(shot.timestamp_ns, "shot timestamp ns")?,
+                        shot.hit as i64,
+                        shot.yaw_deg,
+                        shot.pitch_deg,
+                        shot.target_x,
+                        shot.target_y,
+                        shot.target_z,
+                        shot.target_radius,
+                    ])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(trial_id)
+    }
+}
+
+fn next_aim_sequence(connection: &Connection, prefix: &str) -> Result<u32, String> {
+    let like_pattern = format!("{prefix}%");
+    let mut statement = connection
+        .prepare("SELECT id FROM aim_trials WHERE id LIKE ?1")
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query([like_pattern])
+        .map_err(|error| error.to_string())?;
+    let mut highest = 0_u32;
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        let id: String = row.get(0).map_err(|error| error.to_string())?;
+        if let Some(sequence) = id
+            .strip_prefix(prefix)
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            highest = highest.max(sequence);
+        }
+    }
+    highest
+        .checked_add(1)
+        .ok_or_else(|| format!("aim trial ID sequence exhausted for {prefix}"))
 }
 
 fn write_validation_result(

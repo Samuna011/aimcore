@@ -110,6 +110,48 @@ impl InputIntegrityReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimTrialRecord {
+    pub id: String,
+    pub app_version: String,
+    pub experiment_id: String,
+    pub experiment_version: String,
+    pub trial_type: String,
+    pub status: String,
+    pub processor_id: String,
+    pub processor_version: String,
+    pub processor_config_json: String,
+    pub dpi: f64,
+    pub sensitivity: f64,
+    pub polling_rate_hz: f64,
+    pub fov_degrees_h: f64,
+    pub task_config_json: String,
+    pub metrics_json: String,
+    pub start_unix_ms: i64,
+    pub end_unix_ms: i64,
+    pub start_timestamp_ns: u64,
+    pub end_timestamp_ns: u64,
+    pub duration_secs: f64,
+    pub hits: u32,
+    pub shots: u32,
+    pub misses: u32,
+    pub score_secs: f64,
+    pub accuracy: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimShotRecord {
+    pub shot_index: u32,
+    pub timestamp_ns: u64,
+    pub hit: bool,
+    pub yaw_deg: f64,
+    pub pitch_deg: f64,
+    pub target_x: f64,
+    pub target_y: f64,
+    pub target_z: f64,
+    pub target_radius: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidationResult {
     pub expected_counts: f64,
     pub observed_net_counts: f64,
