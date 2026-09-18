@@ -61,7 +61,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.4.0` for all new sessions, regardless of processor |
+| `experiment_version` | TEXT | `0.7.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |

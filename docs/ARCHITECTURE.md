@@ -248,7 +248,6 @@ Completed STATIC_CLICK trials persist to dedicated aim tables (`aim_trials`, `ai
 - Separate research UI process (Vue/Tauri/etc.)
 - CSV/JSON export tooling
 - Cross-platform input
-- Pitch camera control
 - Claiming display latency measurement
 - `RenderCameraSample` and render-frame camera tables
 - Future telemetry tables: movements, task_events, performance_metrics, users, devices (documented in `TELEMETRY_SCHEMA.md` only)
