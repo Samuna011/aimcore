@@ -3,9 +3,12 @@ use sense_accel::{create_processor, InputProcessor, RawAccelLinearConfig};
 use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
-    aim_trial::{apply_aim_shot, left_button_down, AimPhase, AimTrial},
+    aim_trial::{
+        aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTrial,
+    },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
+    session::{persist_completed_aim_trial, unix_time_ms},
 };
 
 #[derive(Component, Debug, Clone, Copy, Default)]
@@ -109,7 +112,19 @@ pub fn drain_mouse_to_camera(
             accumulate_stats,
         );
         if aim.phase == AimPhase::Armed && left_button_down(sample.buttons) {
-            apply_aim_shot(&mut aim, &camera, sample.timestamp_ns);
+            if apply_aim_shot(&mut aim, &camera, sample.timestamp_ns) {
+                let status = match unix_time_ms() {
+                    Ok(end_unix_ms) => persist_completed_aim_trial(
+                        &settings,
+                        &active_processor,
+                        &mut aim,
+                        end_unix_ms,
+                        sample.timestamp_ns,
+                    ),
+                    Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+                };
+                aim.last_persist = Some(status);
+            }
         }
         if accumulate_stats {
             buffers.0.processed.push(ProcessedMouseSample {

@@ -52,6 +52,41 @@ pub struct AimPersistStatus {
     pub error: Option<String>,
 }
 
+/// Map insert Ok/Err into HUD-facing persist status (score always filled from trial).
+pub fn aim_persist_status_from_insert(
+    trial: &AimTrial,
+    result: Result<String, String>,
+) -> AimPersistStatus {
+    let shots = trial.shot_log.len() as u32;
+    let hits = trial.hits;
+    let accuracy = if shots == 0 {
+        0.0
+    } else {
+        hits as f64 / shots as f64
+    };
+    let score_secs = trial.score_secs.unwrap_or(0.0);
+    match result {
+        Ok(id) => AimPersistStatus {
+            trial_id: Some(id),
+            score_secs,
+            hits,
+            shots,
+            accuracy,
+            saved_ok: true,
+            error: None,
+        },
+        Err(error) => AimPersistStatus {
+            trial_id: None,
+            score_secs,
+            hits,
+            shots,
+            accuracy,
+            saved_ok: false,
+            error: Some(error),
+        },
+    }
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct AimTrial {
     pub phase: AimPhase,
@@ -132,6 +167,7 @@ pub fn start_aim_trial(
     trial: &mut AimTrial,
     validation: ValidationState,
     now_ns: u64,
+    start_unix_ms: i64,
 ) -> bool {
     if validation.is_running() || trial.phase == AimPhase::Armed {
         return false;
@@ -145,7 +181,7 @@ pub fn start_aim_trial(
     trial.score_secs = None;
     trial.shot_log.clear();
     trial.start_timestamp_ns = now_ns;
-    trial.start_unix_ms = 0;
+    trial.start_unix_ms = start_unix_ms;
     trial.current_center = random_front_cone_center(&mut trial.rng_state);
     true
 }
@@ -433,7 +469,13 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000
+        ));
         let first = trial.current_center;
 
         // Aim away: miss
@@ -459,7 +501,13 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000
+        ));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -481,7 +529,13 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let start = 5_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, start));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000
+        ));
         for i in 0..AIM_HITS_TO_FINISH {
             trial.current_center = front_cone_center(0.0, 0.0);
             pose.yaw_deg = 0.0;
@@ -507,7 +561,13 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000
+        ));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -538,7 +598,13 @@ mod tests {
         };
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000
+        ));
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
 
@@ -557,9 +623,9 @@ mod tests {
             &mut pose,
             &mut trial,
             ValidationState::Idle,
-            start_ns
+            start_ns,
+            1_700_000_000_000
         ));
-        trial.start_unix_ms = 1_700_000_000_000;
 
         for i in 0..AIM_HITS_TO_FINISH {
             trial.current_center = front_cone_center(0.0, 0.0);
@@ -595,5 +661,45 @@ mod tests {
         assert!((record.score_secs - 0.5).abs() < 1e-9);
         assert_eq!(record.start_unix_ms, 1_700_000_000_000);
         assert_eq!(record.end_unix_ms, 1_700_000_000_600);
+    }
+
+    #[test]
+    fn persist_status_ok_and_err_shapes() {
+        let mut trial = AimTrial {
+            hits: 5,
+            score_secs: Some(0.42),
+            ..Default::default()
+        };
+        trial.shot_log = vec![
+            AimShotRecord {
+                shot_index: 0,
+                timestamp_ns: 1,
+                hit: true,
+                yaw_deg: 0.0,
+                pitch_deg: 0.0,
+                target_x: 0.0,
+                target_y: 0.0,
+                target_z: 0.0,
+                target_radius: 0.25,
+            };
+            6
+        ];
+
+        let ok = aim_persist_status_from_insert(&trial, Ok("aim_20260918_000001".into()));
+        assert!(ok.saved_ok);
+        assert_eq!(ok.trial_id.as_deref(), Some("aim_20260918_000001"));
+        assert!(ok.error.is_none());
+        assert_eq!(ok.hits, 5);
+        assert_eq!(ok.shots, 6);
+        assert!((ok.accuracy - 5.0 / 6.0).abs() < 1e-9);
+        assert!((ok.score_secs - 0.42).abs() < 1e-9);
+
+        let err = aim_persist_status_from_insert(&trial, Err("disk full".into()));
+        assert!(!err.saved_ok);
+        assert!(err.trial_id.is_none());
+        assert_eq!(err.error.as_deref(), Some("disk full"));
+        assert_eq!(err.hits, 5);
+        assert_eq!(err.shots, 6);
+        assert!((err.score_secs - 0.42).abs() < 1e-9);
     }
 }

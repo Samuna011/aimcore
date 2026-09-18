@@ -12,6 +12,10 @@ use sense_types::{
 };
 
 use crate::{
+    aim_trial::{
+        aim_persist_status_from_insert, build_completed_aim_trial_record, AimPersistStatus,
+        AimTrial,
+    },
     camera_ctrl::{ActiveInputProcessor, LiveInputStats, ProcessorTimingState},
     config::{ExperimentSettings, TelemetryBuffers, ValidationState},
     input_plugin::InputIntegrityTracker,
@@ -19,7 +23,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.6.1";
+const EXPERIMENT_VERSION: &str = "0.7.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]
@@ -231,6 +235,32 @@ pub fn reset_counters(
     Ok(())
 }
 
+/// Persist a finished STATIC_CLICK trial (5th hit). Abort / in-progress must not call this.
+pub fn persist_completed_aim_trial(
+    settings: &ExperimentSettings,
+    active_processor: &ActiveInputProcessor,
+    trial: &mut AimTrial,
+    end_unix_ms: i64,
+    end_timestamp_ns: u64,
+) -> AimPersistStatus {
+    let record = build_completed_aim_trial_record(
+        settings,
+        active_processor.processor.id(),
+        active_processor.processor.version(),
+        &active_processor.processor.config_json(),
+        trial,
+        end_unix_ms,
+        end_timestamp_ns,
+    );
+    let shots = trial.shot_log.clone();
+    let result = (|| {
+        let db = open_database()?;
+        let utc_date = utc_date_from_unix_ms(end_unix_ms);
+        db.insert_completed_aim_trial(&utc_date, &record, &shots)
+    })();
+    aim_persist_status_from_insert(trial, result)
+}
+
 fn integrity_report_with_raw_input_failures(
     mut report: InputIntegrityReport,
     failures_at_start: u64,
@@ -287,7 +317,7 @@ fn next_sequence(db: &TelemetryDb, sql: &str, prefix: &str) -> Result<u32, Strin
         .ok_or_else(|| format!("ID sequence exhausted for {prefix}"))
 }
 
-fn unix_time_ms() -> Result<i64, String> {
+pub fn unix_time_ms() -> Result<i64, String> {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
@@ -333,7 +363,7 @@ mod tests {
 
     #[test]
     fn experiment_version_captures_gain_and_cap_settings() {
-        assert_eq!(EXPERIMENT_VERSION, "0.6.1");
+        assert_eq!(EXPERIMENT_VERSION, "0.7.0");
     }
 
     #[test]

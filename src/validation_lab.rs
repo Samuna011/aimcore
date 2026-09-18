@@ -13,7 +13,10 @@ use crate::{
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
-    session::{database_path, end_validation, reset_counters, start_validation, ValidationSession},
+    session::{
+        database_path, end_validation, reset_counters, start_validation, unix_time_ms,
+        ValidationSession,
+    },
 };
 
 pub fn draw_hud(
@@ -163,7 +166,8 @@ pub fn draw_hud(
                     .clicked()
                 {
                     let now = sense_input_win::monotonic_now_ns();
-                    if start_aim_trial(&mut pose, &mut aim, *validation, now) {
+                    let start_ms = unix_time_ms().unwrap_or(0);
+                    if start_aim_trial(&mut pose, &mut aim, *validation, now, start_ms) {
                         session.status_message = Some(format!(
                             "Aim run armed — destroy {AIM_HITS_TO_FINISH} green spheres (LMB). Miss keeps the same target."
                         ));
@@ -176,15 +180,73 @@ pub fn draw_hud(
                     cancel_aim_trial(&mut aim);
                 }
             });
-            ui.monospace(format!(
-                "AIM: {}  HITS: {}/{}",
-                match aim.phase {
-                    AimPhase::Idle => "Idle",
-                    AimPhase::Armed => "Armed",
-                },
-                aim.hits,
-                AIM_HITS_TO_FINISH
-            ));
+            match aim.phase {
+                AimPhase::Armed => {
+                    let elapsed = sense_input_win::monotonic_now_ns()
+                        .saturating_sub(aim.start_timestamp_ns) as f64
+                        / 1e9;
+                    ui.monospace(format!(
+                        "AIM: Armed  HITS: {}/{AIM_HITS_TO_FINISH}  ELAPSED: {elapsed:.3} s",
+                        aim.hits
+                    ));
+                    let proc_id = active_processor.processor.id();
+                    let short_cfg = if proc_id == "none" {
+                        "none".to_string()
+                    } else {
+                        let gain = if settings.gain { "on" } else { "off" };
+                        let cap = match settings.cap_mode {
+                            CapMode::Out => "out",
+                            CapMode::In => "in",
+                            CapMode::Io => "io",
+                        };
+                        format!(
+                            "{proc_id} gain={gain} caps={cap}/{:.0}/{:.0}",
+                            settings.cap_x, settings.cap_y
+                        )
+                    };
+                    ui.monospace(format!("PROCESSOR: {short_cfg}"));
+                }
+                AimPhase::Idle => {
+                    ui.monospace(format!(
+                        "AIM: Idle  HITS: {}/{AIM_HITS_TO_FINISH}",
+                        aim.hits
+                    ));
+                    if let Some(secs) = aim.score_secs {
+                        let shots = aim.shot_log.len() as u32;
+                        let accuracy = if shots == 0 {
+                            0.0
+                        } else {
+                            aim.hits as f64 / shots as f64
+                        };
+                        let duration = aim
+                            .last_timestamp_ns
+                            .saturating_sub(aim.start_timestamp_ns)
+                            as f64
+                            / 1e9;
+                        ui.strong(format!(
+                            "RUN SCORE: {secs:.3} s  ({AIM_HITS_TO_FINISH} hits)"
+                        ));
+                        ui.monospace(format!(
+                            "DURATION: {duration:.3} s  ACCURACY: {}/{} ({:.1}%)",
+                            aim.hits,
+                            shots,
+                            accuracy * 100.0
+                        ));
+                    }
+                    if let Some(persist) = &aim.last_persist {
+                        if persist.saved_ok {
+                            if let Some(id) = &persist.trial_id {
+                                ui.monospace(format!("SAVED: {id}"));
+                            }
+                        } else if let Some(error) = &persist.error {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_RED,
+                                format!("SAVE FAILED: {error}"),
+                            );
+                        }
+                    }
+                }
+            }
             match aim.last_hit {
                 Some(true) => {
                     ui.monospace(format!(
@@ -201,11 +263,6 @@ pub fn draw_hud(
                 None => {
                     ui.monospace("LAST SHOT: —");
                 }
-            }
-            if let Some(secs) = aim.score_secs {
-                ui.strong(format!(
-                    "RUN SCORE: {secs:.3} s  ({AIM_HITS_TO_FINISH} hits)"
-                ));
             }
             ui.monospace(format!(
                 "STATE: {}",
