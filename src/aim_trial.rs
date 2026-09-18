@@ -2,9 +2,11 @@
 
 use bevy::prelude::*;
 
+use sense_types::{AimShotRecord, AimTrialRecord};
+
 use crate::{
     camera_ctrl::YawPitch,
-    config::ValidationState,
+    config::{ExperimentSettings, ValidationState},
 };
 
 /// Windows raw input: left button down bit in `RAWINPUT` mouse `ulButtons`.
@@ -21,6 +23,11 @@ pub const AIM_PITCH_DOWN_DEG: f64 = 5.0;
 pub const AIM_FLOOR_CLEARANCE: f32 = 0.35;
 pub const AIM_HITS_TO_FINISH: u32 = 5;
 
+pub const AIM_APP_VERSION: &str = "0.1.0";
+pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.7.0";
+pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
+
 #[derive(Component)]
 pub struct AimTarget;
 
@@ -34,6 +41,17 @@ pub enum AimPhase {
     Armed,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AimPersistStatus {
+    pub trial_id: Option<String>,
+    pub score_secs: f64,
+    pub hits: u32,
+    pub shots: u32,
+    pub accuracy: f64,
+    pub saved_ok: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct AimTrial {
     pub phase: AimPhase,
@@ -44,7 +62,10 @@ pub struct AimTrial {
     pub last_timestamp_ns: u64,
     pub current_center: Vec3,
     pub start_timestamp_ns: u64,
+    pub start_unix_ms: i64,
     pub score_secs: Option<f64>,
+    pub shot_log: Vec<AimShotRecord>,
+    pub last_persist: Option<AimPersistStatus>,
     rng_state: u64,
 }
 
@@ -59,7 +80,10 @@ impl Default for AimTrial {
             last_timestamp_ns: 0,
             current_center: front_cone_center(0.0, 0.0),
             start_timestamp_ns: 0,
+            start_unix_ms: 0,
             score_secs: None,
+            shot_log: Vec::new(),
+            last_persist: None,
             rng_state: 0xC0FFEE,
         }
     }
@@ -119,13 +143,84 @@ pub fn start_aim_trial(
     trial.hits = 0;
     trial.last_hit = None;
     trial.score_secs = None;
+    trial.shot_log.clear();
     trial.start_timestamp_ns = now_ns;
+    trial.start_unix_ms = 0;
     trial.current_center = random_front_cone_center(&mut trial.rng_state);
     true
 }
 
 pub fn cancel_aim_trial(trial: &mut AimTrial) {
+    if trial.phase == AimPhase::Armed {
+        trial.hits = 0;
+        trial.shot_log.clear();
+        trial.score_secs = None;
+        trial.last_hit = None;
+    }
     trial.phase = AimPhase::Idle;
+}
+
+pub fn static_click_task_config_json() -> String {
+    format!(
+        r#"{{"hits_required":{},"target_radius":{},"aim_distance":{},"yaw_half_deg":{},"pitch_up_deg":{},"pitch_down_deg":{},"floor_clearance":{}}}"#,
+        AIM_HITS_TO_FINISH,
+        AIM_TARGET_RADIUS,
+        AIM_DISTANCE,
+        AIM_YAW_HALF_DEG,
+        AIM_PITCH_UP_DEG,
+        AIM_PITCH_DOWN_DEG,
+        AIM_FLOOR_CLEARANCE,
+    )
+}
+
+pub fn build_completed_aim_trial_record(
+    settings: &ExperimentSettings,
+    processor_id: &str,
+    processor_version: &str,
+    processor_config_json: &str,
+    trial: &AimTrial,
+    end_unix_ms: i64,
+    end_timestamp_ns: u64,
+) -> AimTrialRecord {
+    let shots = trial.shot_log.len() as u32;
+    let hits = trial.hits;
+    let misses = shots.saturating_sub(hits);
+    let accuracy = if shots == 0 {
+        0.0
+    } else {
+        hits as f64 / shots as f64
+    };
+    let duration_secs =
+        (end_timestamp_ns.saturating_sub(trial.start_timestamp_ns)) as f64 / 1e9;
+    let score_secs = trial.score_secs.unwrap_or(duration_secs);
+
+    AimTrialRecord {
+        id: String::new(),
+        app_version: AIM_APP_VERSION.into(),
+        experiment_id: AIM_EXPERIMENT_ID.into(),
+        experiment_version: AIM_EXPERIMENT_VERSION.into(),
+        trial_type: AIM_TRIAL_TYPE.into(),
+        status: "completed".into(),
+        processor_id: processor_id.into(),
+        processor_version: processor_version.into(),
+        processor_config_json: processor_config_json.into(),
+        dpi: settings.dpi,
+        sensitivity: settings.sensitivity,
+        polling_rate_hz: settings.polling_rate_hz as f64,
+        fov_degrees_h: settings.fov_degrees_h,
+        task_config_json: static_click_task_config_json(),
+        metrics_json: "{}".into(),
+        start_unix_ms: trial.start_unix_ms,
+        end_unix_ms,
+        start_timestamp_ns: trial.start_timestamp_ns,
+        end_timestamp_ns,
+        duration_secs,
+        hits,
+        shots,
+        misses,
+        score_secs,
+        accuracy,
+    }
 }
 
 /// Returns true if this click ended the whole run (5th hit).
@@ -149,6 +244,17 @@ pub fn apply_aim_shot(
         trial.current_center.z as f64,
     ];
     let hit = sense_math::ray_sphere_hit(origin, dir, center, AIM_TARGET_RADIUS as f64);
+    trial.shot_log.push(AimShotRecord {
+        shot_index: trial.shot_log.len() as u32,
+        timestamp_ns,
+        hit,
+        yaw_deg: pose.yaw_deg,
+        pitch_deg: pose.pitch_deg,
+        target_x: center[0],
+        target_y: center[1],
+        target_z: center[2],
+        target_radius: AIM_TARGET_RADIUS as f64,
+    });
     trial.last_hit = Some(hit);
     trial.last_yaw_deg = pose.yaw_deg;
     trial.last_pitch_deg = pose.pitch_deg;
@@ -349,7 +455,29 @@ mod tests {
     }
 
     #[test]
-    fn fifth_hit_scores_and_idles() {
+    fn shots_buffer_on_hit_and_miss() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let now = 1_000_000_000u64;
+        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+
+        pose.yaw_deg = 90.0;
+        assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
+        assert_eq!(trial.shot_log.len(), 1);
+        assert!(!trial.shot_log[0].hit);
+        assert_eq!(trial.hits, 0);
+
+        trial.current_center = front_cone_center(0.0, 0.0);
+        pose.yaw_deg = 0.0;
+        pose.pitch_deg = 0.0;
+        assert!(!apply_aim_shot(&mut trial, &pose, now + 2));
+        assert_eq!(trial.shot_log.len(), 2);
+        assert!(trial.shot_log[1].hit);
+        assert_eq!(trial.hits, 1);
+    }
+
+    #[test]
+    fn fifth_hit_sets_score_and_shot_count() {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let start = 5_000_000_000u64;
@@ -368,7 +496,104 @@ mod tests {
                 assert_eq!(trial.hits, 5);
                 let score = trial.score_secs.expect("score");
                 assert!((score - 0.5).abs() < 1e-9);
+                assert_eq!(trial.shot_log.len(), AIM_HITS_TO_FINISH as usize);
+                assert_eq!(trial.shot_log.len() as u32, trial.hits);
             }
         }
+    }
+
+    #[test]
+    fn cancel_armed_clears_run_without_persist_ok() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let now = 1_000_000_000u64;
+        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+
+        pose.yaw_deg = 90.0;
+        assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
+        assert_eq!(trial.shot_log.len(), 1);
+
+        cancel_aim_trial(&mut trial);
+        assert_eq!(trial.phase, AimPhase::Idle);
+        assert!(trial.score_secs.is_none());
+        assert!(trial.last_persist.is_none());
+        assert!(trial.shot_log.is_empty());
+        assert_eq!(trial.hits, 0);
+    }
+
+    #[test]
+    fn cancel_armed_keeps_prior_last_persist() {
+        let prior = AimPersistStatus {
+            trial_id: Some("aim_20260918_000001".into()),
+            score_secs: 0.42,
+            hits: 5,
+            shots: 6,
+            accuracy: 5.0 / 6.0,
+            saved_ok: true,
+            error: None,
+        };
+        let mut trial = AimTrial {
+            last_persist: Some(prior.clone()),
+            ..Default::default()
+        };
+        let mut pose = YawPitch::default();
+        let now = 1_000_000_000u64;
+        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now));
+        pose.yaw_deg = 90.0;
+        assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
+
+        cancel_aim_trial(&mut trial);
+        assert_eq!(trial.last_persist, Some(prior));
+        assert!(trial.score_secs.is_none());
+    }
+
+    #[test]
+    fn build_record_snapshots_task_and_processor() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let start_ns = 5_000_000_000u64;
+        let end_ns = start_ns + 600_000_000;
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start_ns
+        ));
+        trial.start_unix_ms = 1_700_000_000_000;
+
+        for i in 0..AIM_HITS_TO_FINISH {
+            trial.current_center = front_cone_center(0.0, 0.0);
+            pose.yaw_deg = 0.0;
+            pose.pitch_deg = 0.0;
+            apply_aim_shot(&mut trial, &pose, start_ns + (i as u64 + 1) * 100_000_000);
+        }
+
+        let settings = ExperimentSettings::default();
+        let record = build_completed_aim_trial_record(
+            &settings,
+            "rawaccel_linear",
+            "0.2.0",
+            r#"{"acceleration":0.01}"#,
+            &trial,
+            1_700_000_000_600,
+            end_ns,
+        );
+
+        assert_eq!(record.trial_type, "STATIC_CLICK");
+        assert_eq!(record.experiment_version, "0.7.0");
+        assert_eq!(record.experiment_id, "aim_lab");
+        assert_eq!(record.status, "completed");
+        assert!(record.id.is_empty());
+        assert_eq!(record.processor_id, "rawaccel_linear");
+        assert_eq!(record.processor_version, "0.2.0");
+        assert_eq!(record.processor_config_json, r#"{"acceleration":0.01}"#);
+        assert!(record.task_config_json.contains("\"hits_required\":5"));
+        assert_eq!(record.hits, 5);
+        assert_eq!(record.shots, 5);
+        assert_eq!(record.misses, 0);
+        assert!((record.accuracy - 1.0).abs() < 1e-9);
+        assert!((record.score_secs - 0.5).abs() < 1e-9);
+        assert_eq!(record.start_unix_ms, 1_700_000_000_000);
+        assert_eq!(record.end_unix_ms, 1_700_000_000_600);
     }
 }
