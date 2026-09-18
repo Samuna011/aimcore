@@ -165,12 +165,20 @@ pub fn draw_hud(
                     .add_enabled(can_start_aim, egui::Button::new("Start Aim Trial"))
                     .clicked()
                 {
-                    let now = sense_input_win::monotonic_now_ns();
-                    let start_ms = unix_time_ms().unwrap_or(0);
-                    if start_aim_trial(&mut pose, &mut aim, *validation, now, start_ms) {
-                        session.status_message = Some(format!(
-                            "Aim run armed — destroy {AIM_HITS_TO_FINISH} green spheres (LMB). Miss keeps the same target."
-                        ));
+                    match unix_time_ms() {
+                        Ok(start_ms) => {
+                            let now = sense_input_win::monotonic_now_ns();
+                            if start_aim_trial(&mut pose, &mut aim, *validation, now, start_ms)
+                            {
+                                session.status_message = Some(format!(
+                                    "Aim run armed — destroy {AIM_HITS_TO_FINISH} green spheres (LMB). Miss keeps the same target."
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            session.status_message =
+                                Some(format!("Aim start failed: wall clock unavailable ({error})"));
+                        }
                     }
                 }
                 if ui

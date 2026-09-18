@@ -419,3 +419,44 @@ fn insert_completed_aim_trial_rejects_non_completed_status() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[test]
+fn insert_completed_aim_trial_rolls_back_on_duplicate_shot_index() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let shot = AimShotRecord {
+        shot_index: 0,
+        timestamp_ns: 1_100_000_000,
+        hit: true,
+        yaw_deg: 0.1,
+        pitch_deg: -0.2,
+        target_x: 1.0,
+        target_y: 2.0,
+        target_z: 10.0,
+        target_radius: 0.25,
+    };
+    // Second row reuses shot_index 0 so the shot INSERT violates
+    // PRIMARY KEY(trial_id, shot_index) after the parent aim_trials row is written.
+    let duplicate_shots = vec![shot.clone(), shot];
+
+    let error = db
+        .insert_completed_aim_trial("20260918", &trial, &duplicate_shots)
+        .unwrap_err();
+    assert!(
+        !error.is_empty(),
+        "duplicate shot_index must fail the insert"
+    );
+
+    let trial_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_trials", [], |row| row.get(0))
+        .unwrap();
+    let shot_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_shots", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(trial_count, 0, "aim_trials must fully roll back");
+    assert_eq!(shot_count, 0, "aim_shots must fully roll back");
+}
