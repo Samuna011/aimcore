@@ -38,7 +38,7 @@ Validation Lab session flush paths are untouched.
 
 | Column | Notes |
 |--------|--------|
-| `id` | Stable padded id, e.g. `aim_{utc_date}_{seq:06}` |
+| `id` | Stable padded id: `aim_{utc_date}_{seq:06}` — see **Trial ID generation** |
 | `app_version` | App constant |
 | `experiment_id` | `aim_lab` (distinct from `validation_lab`) |
 | `experiment_version` | `0.7.0` |
@@ -91,6 +91,19 @@ Future trial types add their own keys; readers must branch on `trial_type`.
 | `target_radius` | Radius used for hit test |
 
 Index: `(trial_id, shot_index)` unique.
+
+## Trial ID generation
+
+Format: `aim_{utc_date}_{seq:06}` (UTC date from wall-clock finish time, `YYYYMMDD`).
+
+**`seq` source (required):** same pattern as Validation Lab `session_{date}_` ids — **not** `COUNT(*) + 1`.
+
+1. `prefix = "aim_{utc_date}_"`
+2. Scan existing `aim_trials.id` matching that prefix; parse the trailing 6-digit (or numeric) suffix; take **max**, then **`seq = max + 1`** (start at `1` if none).
+3. Allocate **inside** the completed-trial SQLite transaction on the same connection as the inserts.
+4. Backstop: `id` is PRIMARY KEY. Insert conflict → abort the whole txn; HUD reports `save failed` (no overwrite, no partial shots).
+
+Do not derive `seq` from row counts, wall-clock alone, or an unlocked in-memory counter.
 
 ## Write rules
 
