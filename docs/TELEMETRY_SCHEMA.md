@@ -1,7 +1,8 @@
-# Telemetry Schema (M1 + M2)
+# Telemetry Schema (M1 + M2 + M3.x)
 
-**Date:** 2026-09-17  
-**M2:** adds `processed_mouse_events`; all new sessions use `experiment_version` `0.4.0`
+**Date:** 2026-09-18  
+**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.7.0`  
+**M3.x:** adds `aim_trials` / `aim_shots` for completed aim runs (`experiment_id` = `aim_lab`)
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -177,13 +178,75 @@ Integrity counters distinguish input pipeline faults from sensitivity model mism
 
 ---
 
-## Future Tables (Post-M2)
+## M3.x Aim Tables
 
-Documented for later phases; **not implemented in M2**:
+Schema created by `TelemetryDb::migrate()` alongside M1/M2 tables. **Completed trials only** — aborted or in-progress runs are never inserted.
+
+### `aim_trials`
+
+One row per **completed** aim trial. `trial_type` discriminates task kind (`STATIC_CLICK` now; future types reuse this table).
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `id` | TEXT PK | `aim_{utc_date}_{seq:06}` |
+| `app_version` | TEXT | binary version |
+| `experiment_id` | TEXT | `aim_lab` (distinct from `validation_lab`) |
+| `experiment_version` | TEXT | `0.7.0` |
+| `trial_type` | TEXT | e.g. `STATIC_CLICK` |
+| `status` | TEXT | always `completed` for inserted rows |
+| `processor_id` | TEXT | snapshot at finish |
+| `processor_version` | TEXT | snapshot at finish |
+| `processor_config_json` | TEXT | snapshot at finish |
+| `dpi` | REAL | counts/inch |
+| `sensitivity` | REAL | game sensitivity |
+| `polling_rate_hz` | REAL | Hz |
+| `fov_degrees_h` | REAL | degrees |
+| `task_config_json` | TEXT | type-specific knobs (see design spec) |
+| `metrics_json` | TEXT | type-specific extras (`{}` for STATIC_CLICK v1) |
+| `start_unix_ms` / `end_unix_ms` | INTEGER | wall clock (Unix ms) |
+| `start_timestamp_ns` / `end_timestamp_ns` | INTEGER | monotonic ns (score clock) |
+| `duration_secs` | REAL | seconds |
+| `hits` | INTEGER | successful hits |
+| `shots` | INTEGER | all clicks (hits + misses) |
+| `misses` | INTEGER | `shots - hits` |
+| `score_secs` | REAL | time to required hits (HUD score) |
+| `accuracy` | REAL | `hits / shots` |
+
+Trial + shots insert in a **single transaction**; failure leaves no partial rows.
+
+### `aim_shots`
+
+Optional per-click rows for click-style tasks. Skipped by trial types that do not use shots.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `trial_id` | TEXT FK | → `aim_trials.id` |
+| `shot_index` | INTEGER | 0-based order within trial |
+| `timestamp_ns` | INTEGER | monotonic shot time |
+| `hit` | INTEGER | 0/1 |
+| `yaw_deg` / `pitch_deg` | REAL | look at shot |
+| `target_x` / `target_y` / `target_z` | REAL | sphere center |
+| `target_radius` | REAL | radius used for hit test |
+
+Primary key: `(trial_id, shot_index)`.
+
+**Inspect after a run:**
+
+```bash
+sqlite3 data/sense_maxer.db "SELECT id, hits, shots, score_secs, accuracy, status FROM aim_trials ORDER BY end_unix_ms;"
+sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_shots WHERE trial_id='aim_YYYYMMDD_000001';"
+```
+
+Design: [2026-09-18-m3x-aim-trial-persistence-design.md](./superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md).
+
+---
+
+## Future Tables (Post-M3.x)
+
+Documented for later phases; **not implemented**:
 
 | Table | Purpose |
 |-------|---------|
-| `trials` | Discrete aim/task trials |
 | `movements` | Segmented movement episodes |
 | `task_events` | Task lifecycle markers |
 | `performance_metrics` | Aggregated performance stats |
@@ -191,7 +254,7 @@ Documented for later phases; **not implemented in M2**:
 | `devices` | Hardware profiles |
 | `render_camera_samples` | Pose at render submit/present |
 
-CSV/JSON export is also out of M1 scope; data must be queryable via SQLite.
+CSV/JSON export is also out of scope; data must be queryable via SQLite.
 
 ---
 

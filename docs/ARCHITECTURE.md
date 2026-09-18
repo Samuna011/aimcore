@@ -1,7 +1,7 @@
 # Architecture — VALORANT Input Validation Lab (M1 + M2)
 
 **Date:** 2026-09-17  
-**Scope:** M1 Validation Lab + M2 InputProcessor framework + M2.x Phase 1.1 (`rawaccel_linear` v1.1.0 — Gain + caps, documented math only, not driver comparison); no aim tasks.  
+**Scope:** M1 Validation Lab + M2 InputProcessor framework + M2.x Phase 1.1 (`rawaccel_linear` v1.1.0 — Gain + caps, documented math only, not driver comparison) + M3 STATIC_CLICK + M3.x aim trial SQLite persistence (`aim_trials` / `aim_shots`; completed trials only).  
 **Stack:** Bevy `0.19.1`, `bevy_egui` `0.42.0`, Windows only.
 
 ---
@@ -233,9 +233,15 @@ See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline and manual checklist; [M2X
 
 ---
 
-## Explicitly Out of Scope (M1 + M2)
+## M3.x Aim Trial Persistence
 
-- STATIC_CLICK / flick / tracking / target switching
+Completed STATIC_CLICK trials persist to dedicated aim tables (`aim_trials`, `aim_shots`) in a single SQLite transaction. Validation Lab session flush paths are unchanged. Aborted or in-progress runs are never inserted. HUD shows last-saved `trial_id` or save error. See [TELEMETRY_SCHEMA.md](./TELEMETRY_SCHEMA.md) and [2026-09-18-m3x-aim-trial-persistence-design.md](./superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md). **M3.x STOPPED** — no new trial types until a new spec.
+
+---
+
+## Explicitly Out of Scope (M1 + M2 + M3.x)
+
+- FLICK / tracking / target switching (beyond STATIC_CLICK v1)
 - Movement segmentation and flick phase classifier
 - Raw Accel modes beyond M2.x Phase 1.1 `rawaccel_linear` (Natural, Power, Jump, LUT, anisotropy, driver comparison)
 - ML / Bayesian optimization / auto sensitivity search
@@ -245,7 +251,7 @@ See [M2_PROCESSOR.md](./M2_PROCESSOR.md) for pipeline and manual checklist; [M2X
 - Pitch camera control
 - Claiming display latency measurement
 - `RenderCameraSample` and render-frame camera tables
-- Future telemetry tables: trials, movements, task_events, performance_metrics, users, devices (documented in `TELEMETRY_SCHEMA.md` only)
+- Future telemetry tables: movements, task_events, performance_metrics, users, devices (documented in `TELEMETRY_SCHEMA.md` only)
 
 ---
 

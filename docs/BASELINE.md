@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.6.1` (STATIC_CLICK 5-hit front-cone timed run).
+**Experiment version:** `0.7.0` (STATIC_CLICK 5-hit front-cone timed run + aim trial SQLite persistence).
 
 ## Research progression (locked order)
 
@@ -63,7 +63,9 @@ M2  InputProcessor framework      ← COMPLETE
  ↓
 M2.x Reproduce Raw Accel mathematics ← Phase 1.1 + feel parity
  ↓
-M3  Controlled aim task           ← STATIC_CLICK v1 (exp 0.6.0)
+M3  Controlled aim task           ← STATIC_CLICK v1 (exp 0.6.x)
+ ↓
+M3.x Aim trial persistence        ← COMPLETE / STOPPED (exp 0.7.0)
  ↓
 M4  Compare conditions
  ↓
