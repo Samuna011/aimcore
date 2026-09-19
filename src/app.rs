@@ -31,6 +31,7 @@ pub fn run() {
         .init_resource::<LiveFrameStats>()
         .init_resource::<ValidationSession>()
         .init_resource::<LookCapture>()
+        .init_resource::<crate::camera_ctrl::LookCapturePrev>()
         .init_resource::<AimTrial>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {

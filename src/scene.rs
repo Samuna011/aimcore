@@ -1,6 +1,5 @@
 use bevy::{
     camera::Projection,
-    math::primitives::Plane3d,
     prelude::*,
     window::PrimaryWindow,
 };
@@ -11,8 +10,6 @@ const INITIAL_ASPECT_RATIO: f64 = 16.0 / 9.0;
 
 pub fn setup_scene(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     settings: Res<ExperimentSettings>,
 ) {
     commands.insert_resource(ClearColor(Color::srgb(0.025, 0.03, 0.04)));
@@ -26,15 +23,7 @@ pub fn setup_scene(
         }),
         Transform::from_xyz(0.0, 1.6, 4.0).looking_at(Vec3::new(0.0, 1.6, -4.0), Vec3::Y),
     ));
-
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(30.0, 30.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.18, 0.19, 0.21),
-            perceptual_roughness: 0.95,
-            ..default()
-        })),
-    ));
+    // Opaque scene floor removed — aim arena provides a see-through grid floor.
 }
 
 pub fn maintain_horizontal_fov(

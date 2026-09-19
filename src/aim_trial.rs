@@ -636,92 +636,58 @@ pub fn spawn_aim_target(
     }
 }
 
-/// Translucent room + edge beams so depth/distance in the front cone are readable.
+/// See-through floor with gray grid lines (no wall box).
 pub fn spawn_aim_arena(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Camera at z=4 looking −Z; room encloses the spawn cone ahead.
-    let room_size = Vec3::new(11.0, 3.4, 12.0);
-    let room_center = Vec3::new(0.0, room_size.y * 0.5, -1.0);
+    let floor_extent = 24.0_f32;
+    let half = floor_extent * 0.5;
+    let floor_z = -1.0_f32;
+    let y = 0.02_f32;
+    let line_t = 0.025_f32;
+    let step = 1.0_f32;
 
-    let glass = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.35, 0.55, 0.75, 0.12),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        cull_mode: None,
-        ..default()
-    });
     commands.spawn((
         AimArena,
-        Mesh3d(meshes.add(Cuboid::from_size(room_size))),
-        MeshMaterial3d(glass),
-        Transform::from_translation(room_center),
-    ));
-
-    let edge = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.55, 0.7, 0.85),
-        unlit: true,
-        ..default()
-    });
-    let t = 0.04_f32;
-    let hx = room_size.x * 0.5;
-    let hy = room_size.y * 0.5;
-    let hz = room_size.z * 0.5;
-    let corners = [
-        Vec3::new(-hx, -hy, -hz),
-        Vec3::new(hx, -hy, -hz),
-        Vec3::new(-hx, hy, -hz),
-        Vec3::new(hx, hy, -hz),
-        Vec3::new(-hx, -hy, hz),
-        Vec3::new(hx, -hy, hz),
-        Vec3::new(-hx, hy, hz),
-        Vec3::new(hx, hy, hz),
-    ];
-    let edges = [
-        (0, 1),
-        (2, 3),
-        (4, 5),
-        (6, 7),
-        (0, 2),
-        (1, 3),
-        (4, 6),
-        (5, 7),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-    ];
-    for (a, b) in edges {
-        let pa = room_center + corners[a];
-        let pb = room_center + corners[b];
-        let mid = (pa + pb) * 0.5;
-        let dir = pb - pa;
-        let len = dir.length().max(0.01);
-        let rot = Quat::from_rotation_arc(Vec3::Z, dir.normalize());
-        let transform = Transform::from_translation(mid)
-            .with_rotation(rot)
-            .with_scale(Vec3::new(t, t, len));
-        commands.spawn((
-            AimArena,
-            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-            MeshMaterial3d(edge.clone()),
-            transform,
-        ));
-    }
-
-    // Floor plate inside the room for stronger ground reference.
-    commands.spawn((
-        AimArena,
-        Mesh3d(meshes.add(Cuboid::new(room_size.x - 0.2, 0.02, room_size.z - 0.2))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(floor_extent, floor_extent))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.22, 0.24, 0.28),
+            base_color: Color::srgba(0.35, 0.38, 0.42, 0.08),
+            alpha_mode: AlphaMode::Blend,
             unlit: true,
+            cull_mode: None,
             ..default()
         })),
-        Transform::from_translation(Vec3::new(0.0, 0.01, room_center.z)),
+        Transform::from_xyz(0.0, 0.0, floor_z),
     ));
+
+    let line_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.45, 0.48, 0.52),
+        unlit: true,
+        ..default()
+    });
+
+    let mut z = -half;
+    while z <= half + 1e-4 {
+        commands.spawn((
+            AimArena,
+            Mesh3d(meshes.add(Cuboid::new(floor_extent, line_t, line_t))),
+            MeshMaterial3d(line_mat.clone()),
+            Transform::from_xyz(0.0, y, floor_z + z),
+        ));
+        z += step;
+    }
+    let mut x = -half;
+    while x <= half + 1e-4 {
+        commands.spawn((
+            AimArena,
+            Mesh3d(meshes.add(Cuboid::new(line_t, line_t, floor_extent))),
+            MeshMaterial3d(line_mat.clone()),
+            Transform::from_xyz(x, y, floor_z),
+        ));
+        x += step;
+    }
 }
 
 pub fn sync_aim_target(
@@ -1099,6 +1065,26 @@ mod tests {
         assert_eq!(record.resolution_width, 1920);
         assert_eq!(record.resolution_height, 1080);
         assert!(record.view_config_json.contains("\"horizontal_fov_deg\":103"));
+    }
+
+    #[test]
+    fn look_falling_edge_only_not_level() {
+        // Documented contract for LookCapturePrev: starting while look is already
+        // unlocked must not cancel; only enabled→disabled cancels.
+        let mut prev = false;
+        let mut look = false; // unlocked (HUD)
+        let falling = prev && !look;
+        assert!(!falling);
+        prev = look;
+
+        look = true; // user locks look to aim
+        let falling = prev && !look;
+        assert!(!falling);
+        prev = look;
+
+        look = false; // ESC mid-run
+        let falling = prev && !look;
+        assert!(falling);
     }
 
     #[test]

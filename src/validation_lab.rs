@@ -160,7 +160,7 @@ pub fn draw_hud(
             ui.separator();
             ui.strong("STATIC_CLICK (M3)");
             ui.small(
-                "5 hits in a front cone (±25° yaw, −5°…+12° pitch, above floor). Hit destroys & respawns; miss keeps target. Score = time for 5 hits. Blue box = aim volume.",
+                "5 hits in a front cone (±25° yaw, −5°…+12° pitch, above floor). Hit destroys & respawns; miss keeps target. Score = time for 5 hits.",
             );
             ui.horizontal(|ui| {
                 let can_start_aim =
@@ -211,7 +211,7 @@ pub fn draw_hud(
             ui.separator();
             ui.strong(format!("{GRIDSHOT_TRIAL_TYPE} (M4.a)"));
             ui.small(
-                "60s timed run; 3 exclusive cells on a 3×3 wall; hit → immediate vacant respawn; miss unchanged. Score = hits / accuracy.",
+                "60s timed run; 3 exclusive cells on a 3×3 wall; hit → immediate vacant respawn; miss unchanged. Score = hits / accuracy. After Start, press Esc to lock look/aim; Esc again returns to UI (cancels mid-run).",
             );
             ui.horizontal(|ui| {
                 let can_start_grid =

@@ -13,6 +13,12 @@ use crate::{
     session::{persist_completed_aim_trial, unix_time_ms, ValidationSession},
 };
 
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct LookCapturePrev {
+    /// Previous frame's `LookCapture.enabled` for falling-edge cancel.
+    pub enabled: bool,
+}
+
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct YawPitch {
     pub yaw_deg: f64,
@@ -73,17 +79,21 @@ pub fn drain_mouse_to_camera(
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
+    mut look_prev: ResMut<LookCapturePrev>,
     mut aim: ResMut<AimTrial>,
     mut session: ResMut<ValidationSession>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
-    // While the cursor is free for egui (ESC UI mode), discard queued samples so
-    // pointer movement toward buttons does not rotate the camera or pollute
-    // validation counters / telemetry. If an aim run is Armed, cancel it — otherwise
-    // discarded motion would silently gap a completed trial.
-    if !look.enabled {
-        if on_look_disabled(&mut aim) {
+    // While look is unlocked (ESC UI), discard mouse samples so egui clicks don't aim.
+    // Cancel Armed only on look *falling edge* (was capturing → unlocked). Starting
+    // Gridshot/STATIC_CLICK from the HUD happens while look is already unlocked; a
+    // level-triggered cancel would abort the new run on the next frame.
+    let look_enabled = look.enabled;
+    let falling_edge = look_prev.enabled && !look_enabled;
+    look_prev.enabled = look_enabled;
+    if !look_enabled {
+        if falling_edge && on_look_disabled(&mut aim) {
             session.status_message =
                 Some("Aim run cancelled — look unlocked (ESC) mid-trial.".into());
         }
