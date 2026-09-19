@@ -828,7 +828,7 @@ fn list_aim_trials_summary_orders_newest_first_and_honors_limit() {
     newer.shots = 15;
     newer.accuracy = 0.8;
     newer.score_secs = 3.5;
-    newer.experiment_version = "0.10.0".into();
+    newer.experiment_version = "0.11.0".into();
     let newer_id = db
         .insert_completed_aim_trial("20260919", &newer, &[], &[], &[], &[])
         .unwrap();
@@ -843,7 +843,7 @@ fn list_aim_trials_summary_orders_newest_first_and_honors_limit() {
     assert_eq!(summary.shots, 15);
     assert!((summary.accuracy - 0.8).abs() < f64::EPSILON);
     assert!((summary.score_secs - 3.5).abs() < f64::EPSILON);
-    assert_eq!(summary.experiment_version, "0.10.0");
+    assert_eq!(summary.experiment_version, "0.11.0");
     assert_eq!(summary.end_unix_ms, newer.end_unix_ms);
     assert_ne!(summary.id, older_id);
 }

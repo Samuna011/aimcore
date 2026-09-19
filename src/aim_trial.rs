@@ -30,7 +30,7 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.10.0";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.11.0";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
 pub const STATIC_CLICK_TASK_VERSION: &str = "1";
 pub const PITCH_MODEL_ID: &str = "unverified_0.1";
@@ -1001,7 +1001,7 @@ mod tests {
         let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.10.0");
+        assert_eq!(record.experiment_version, "0.11.0");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());

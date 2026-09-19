@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.10.0` (Lab UI shell: Lobby/Playing/Pause; Esc = pause not cancel; active duration excludes pause; GRIDSHOT + STATIC_CLICK on five-table aim telemetry).
+**Experiment version:** `0.11.0` (Aim History: list completed trials + read-only 3D arena replay from stored telemetry; Esc pauses replay; no schema change; GRIDSHOT + STATIC_CLICK on five-table aim telemetry with Lab UI shell pause semantics).
 
 ## Research progression (locked order)
 
@@ -73,9 +73,11 @@ M4.a GRIDSHOT v1                  ← COMPLETE / STOPPED (exp 0.9.0)
  ↓
 Lab UI shell (Lobby/Playing/Pause) ← COMPLETE / STOPPED (exp 0.10.0)
  ↓
+Aim History replay (list + 3D reconstruct) ← COMPLETE / STOPPED (exp 0.11.0)
+ ↓
 M4  Compare conditions
  ↓
 Longitudinal experiment
 ```
 
-Do not skip ahead. **Stop** after Lab UI shell — do not add tracking / 1wall6 until a new task spec.
+Do not skip ahead. **Stop** after Aim History replay — no completeness charts, validation replay, or delete until a new task spec; do not add tracking / 1wall6 until a new task spec.

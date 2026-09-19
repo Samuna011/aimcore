@@ -24,7 +24,9 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M4.a status:** COMPLETE / STOPPED. GRIDSHOT v1 (60s, 3 concurrent exclusive 3×3 cells, vacant-cell respawn) on the M3.y five-layer model; HUD Start Gridshot + time/hits/accuracy/live; multi-sphere render sync. See [GRIDSHOT design spec](docs/superpowers/specs/2026-09-19-m4a-gridshot-design.md).
 
-**Lab UI shell status:** COMPLETE / STOPPED. Lobby / Playing / Paused screen machine; Esc enters pause (never aborts Armed trials); active trial duration excludes pause time; Settings and Lab tools from Lobby or Pause Home; V detail overlay. `experiment_version` **`0.10.0`**. See [Lab UI shell design spec](docs/superpowers/specs/2026-09-19-lab-ui-shell-design.md). **Stop** — do not add tracking / 1wall6 until a new task spec.
+**Lab UI shell status:** COMPLETE / STOPPED. Lobby / Playing / Paused screen machine; Esc enters pause (never aborts Armed trials); active trial duration excludes pause time; Settings and Lab tools from Lobby or Pause Home; V detail overlay. `experiment_version` **`0.10.0`**. See [Lab UI shell design spec](docs/superpowers/specs/2026-09-19-lab-ui-shell-design.md).
+
+**Aim History replay status:** COMPLETE / STOPPED. History list of completed aim trials; read-only 3D arena replay reconstructs camera, targets, and hit flashes from stored telemetry (no schema change); Esc pauses replay transport. `experiment_version` **`0.11.0`**. See [History replay design spec](docs/superpowers/specs/2026-09-19-aim-history-replay-design.md). **Stop** — no completeness charts, validation replay, or delete; do not add tracking / 1wall6 until a new task spec.
 
 ## Requirements
 
@@ -94,4 +96,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + M4.a GRIDSHOT v1 + **Lab UI shell** complete — **STOPPED** at exp `0.10.0`. Next: new task spec (tracking / 1wall6) or M4 compare conditions.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + M4.a GRIDSHOT v1 + **Lab UI shell** + **Aim History replay** complete — **STOPPED** at exp `0.11.0`. Next: new task spec (tracking / 1wall6) or M4 compare conditions.

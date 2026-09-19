@@ -23,7 +23,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.10.0";
+const EXPERIMENT_VERSION: &str = "0.11.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn experiment_version_captures_gain_and_cap_settings() {
-        assert_eq!(EXPERIMENT_VERSION, "0.10.0");
+        assert_eq!(EXPERIMENT_VERSION, "0.11.0");
     }
 
     #[test]
