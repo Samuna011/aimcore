@@ -4,4 +4,4 @@ mod buffers;
 mod db;
 
 pub use buffers::SessionBuffers;
-pub use db::TelemetryDb;
+pub use db::{AimTrialReplayBundle, AimTrialSummary, TelemetryDb};

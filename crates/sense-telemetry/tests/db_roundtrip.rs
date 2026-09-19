@@ -808,3 +808,150 @@ fn insert_completed_aim_trial_rolls_back_all_layers_on_child_failure() {
     assert_eq!(input_count, 0, "aim_input_samples must fully roll back");
     assert_eq!(camera_count, 0, "aim_camera_samples must fully roll back");
 }
+
+#[test]
+fn list_aim_trials_summary_orders_newest_first_and_honors_limit() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let mut older = sample_aim_trial("completed");
+    older.end_unix_ms = 1_700_000_005_000;
+    older.trial_type = "STATIC_CLICK".into();
+    let older_id = db
+        .insert_completed_aim_trial("20260918", &older, &[], &[], &[], &[])
+        .unwrap();
+
+    let mut newer = sample_aim_trial("completed");
+    newer.end_unix_ms = 1_700_000_010_000;
+    newer.trial_type = "GRIDSHOT".into();
+    newer.hits = 12;
+    newer.shots = 15;
+    newer.accuracy = 0.8;
+    newer.score_secs = 3.5;
+    newer.experiment_version = "0.10.0".into();
+    let newer_id = db
+        .insert_completed_aim_trial("20260919", &newer, &[], &[], &[], &[])
+        .unwrap();
+
+    let summaries = db.list_aim_trials_summary(1).unwrap();
+
+    assert_eq!(summaries.len(), 1);
+    let summary = &summaries[0];
+    assert_eq!(summary.id, newer_id);
+    assert_eq!(summary.trial_type, "GRIDSHOT");
+    assert_eq!(summary.hits, 12);
+    assert_eq!(summary.shots, 15);
+    assert!((summary.accuracy - 0.8).abs() < f64::EPSILON);
+    assert!((summary.score_secs - 3.5).abs() < f64::EPSILON);
+    assert_eq!(summary.experiment_version, "0.10.0");
+    assert_eq!(summary.end_unix_ms, newer.end_unix_ms);
+    assert_ne!(summary.id, older_id);
+}
+
+#[test]
+fn load_aim_trial_bundle_roundtrips_and_orders_children() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let target_events = vec![
+        AimTargetEventRecord {
+            target_id: "target_001".into(),
+            event_index: 1,
+            timestamp_ns: 2_000_000_000,
+            event_type: "despawn".into(),
+            position_x: 1.0,
+            position_y: 2.0,
+            position_z: 10.0,
+            yaw_deg: None,
+            pitch_deg: None,
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            velocity_z: 0.0,
+            event_data_json: "{}".into(),
+        },
+        AimTargetEventRecord {
+            target_id: "target_001".into(),
+            event_index: 0,
+            timestamp_ns: 1_050_000_000,
+            event_type: "spawn".into(),
+            position_x: 1.0,
+            position_y: 2.0,
+            position_z: 10.0,
+            yaw_deg: Some(5.0),
+            pitch_deg: Some(-1.0),
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            velocity_z: 0.0,
+            event_data_json: r#"{"radius":0.25}"#.into(),
+        },
+    ];
+    let shots = vec![
+        AimShotRecord {
+            shot_index: 1,
+            timestamp_ns: 1_900_000_000,
+            hit: false,
+            yaw_deg: 0.2,
+            pitch_deg: -0.1,
+            target_x: 1.0,
+            target_y: 2.0,
+            target_z: 10.0,
+            target_radius: 0.25,
+            target_id: "target_001".into(),
+        },
+        AimShotRecord {
+            shot_index: 0,
+            timestamp_ns: 1_100_000_000,
+            hit: true,
+            yaw_deg: 0.1,
+            pitch_deg: -0.2,
+            target_x: 1.0,
+            target_y: 2.0,
+            target_z: 10.0,
+            target_radius: 0.25,
+            target_id: "target_001".into(),
+        },
+    ];
+    let camera_samples = vec![
+        AimCameraSampleRecord {
+            timestamp_ns: 1_200_000_000,
+            yaw_deg: 0.2,
+            pitch_deg: -0.1,
+            yaw_delta_deg: 0.1,
+            pitch_delta_deg: 0.1,
+        },
+        AimCameraSampleRecord {
+            timestamp_ns: 1_100_000_000,
+            yaw_deg: 0.1,
+            pitch_deg: -0.2,
+            yaw_delta_deg: 0.1,
+            pitch_delta_deg: -0.2,
+        },
+    ];
+    let trial_id = db
+        .insert_completed_aim_trial(
+            "20260919",
+            &trial,
+            &shots,
+            &target_events,
+            &[],
+            &camera_samples,
+        )
+        .unwrap();
+    let mut expected_trial = trial.clone();
+    expected_trial.id = trial_id.clone();
+
+    let bundle = db.load_aim_trial_bundle(&trial_id).unwrap();
+
+    assert_eq!(bundle.trial, expected_trial);
+    assert_eq!(
+        bundle.target_events,
+        vec![target_events[1].clone(), target_events[0].clone()]
+    );
+    assert_eq!(bundle.shots, vec![shots[1].clone(), shots[0].clone()]);
+    assert_eq!(
+        bundle.camera_samples,
+        vec![camera_samples[1].clone(), camera_samples[0].clone()]
+    );
+    assert!(db.load_aim_trial_bundle("missing").is_err());
+}

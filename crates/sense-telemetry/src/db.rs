@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use sense_types::{
     AimCameraSampleRecord, AimInputSampleRecord, AimShotRecord, AimTargetEventRecord,
     AimTrialRecord, ConfigurationRecord, FovAxis, SessionRecord, ValidationResult,
@@ -10,6 +10,26 @@ use crate::SessionBuffers;
 
 pub struct TelemetryDb {
     pub connection: Connection,
+}
+
+#[derive(Debug, Clone)]
+pub struct AimTrialSummary {
+    pub id: String,
+    pub trial_type: String,
+    pub hits: u32,
+    pub shots: u32,
+    pub accuracy: f64,
+    pub score_secs: f64,
+    pub experiment_version: String,
+    pub end_unix_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AimTrialReplayBundle {
+    pub trial: AimTrialRecord,
+    pub target_events: Vec<AimTargetEventRecord>,
+    pub shots: Vec<AimShotRecord>,
+    pub camera_samples: Vec<AimCameraSampleRecord>,
 }
 
 impl TelemetryDb {
@@ -597,6 +617,213 @@ INSERT INTO aim_camera_samples (
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(trial_id)
     }
+
+    pub fn list_aim_trials_summary(&self, limit: usize) -> Result<Vec<AimTrialSummary>, String> {
+        let limit =
+            i64::try_from(limit).map_err(|_| "aim trial summary limit is too large".to_owned())?;
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+SELECT id, trial_type, hits, shots, accuracy, score_secs, experiment_version, end_unix_ms
+FROM aim_trials
+ORDER BY end_unix_ms DESC
+LIMIT ?1
+"#,
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([limit], |row| {
+                Ok(AimTrialSummary {
+                    id: row.get(0)?,
+                    trial_type: row.get(1)?,
+                    hits: row.get(2)?,
+                    shots: row.get(3)?,
+                    accuracy: row.get(4)?,
+                    score_secs: row.get(5)?,
+                    experiment_version: row.get(6)?,
+                    end_unix_ms: row.get(7)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn load_aim_trial_bundle(&self, id: &str) -> Result<AimTrialReplayBundle, String> {
+        let trial = self
+            .connection
+            .query_row(
+                r#"
+SELECT id, app_version, experiment_id, experiment_version, trial_type, status,
+       processor_id, processor_version, processor_config_json, dpi, sensitivity,
+       polling_rate_hz, fov_degrees_h, pitch_model_id, pitch_model_version,
+       pitch_config_json, resolution_width, resolution_height, aspect_ratio,
+       random_seed, task_version, hardware_config_json, view_config_json,
+       task_config_json, metrics_json, start_unix_ms, end_unix_ms,
+       start_timestamp_ns, end_timestamp_ns, duration_secs, hits, shots, misses,
+       score_secs, accuracy
+FROM aim_trials
+WHERE id = ?1
+"#,
+                [id],
+                aim_trial_from_row,
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("aim trial not found: {id}"))?;
+
+        let target_events = query_target_events(&self.connection, id)?;
+        let shots = query_shots(&self.connection, id)?;
+        let camera_samples = query_camera_samples(&self.connection, id)?;
+
+        Ok(AimTrialReplayBundle {
+            trial,
+            target_events,
+            shots,
+            camera_samples,
+        })
+    }
+}
+
+fn aim_trial_from_row(row: &Row<'_>) -> rusqlite::Result<AimTrialRecord> {
+    Ok(AimTrialRecord {
+        id: row.get(0)?,
+        app_version: row.get(1)?,
+        experiment_id: row.get(2)?,
+        experiment_version: row.get(3)?,
+        trial_type: row.get(4)?,
+        status: row.get(5)?,
+        processor_id: row.get(6)?,
+        processor_version: row.get(7)?,
+        processor_config_json: row.get(8)?,
+        dpi: row.get(9)?,
+        sensitivity: row.get(10)?,
+        polling_rate_hz: row.get(11)?,
+        fov_degrees_h: row.get(12)?,
+        pitch_model_id: row.get(13)?,
+        pitch_model_version: row.get(14)?,
+        pitch_config_json: row.get(15)?,
+        resolution_width: row.get(16)?,
+        resolution_height: row.get(17)?,
+        aspect_ratio: row.get(18)?,
+        random_seed: row.get(19)?,
+        task_version: row.get(20)?,
+        hardware_config_json: row.get(21)?,
+        view_config_json: row.get(22)?,
+        task_config_json: row.get(23)?,
+        metrics_json: row.get(24)?,
+        start_unix_ms: row.get(25)?,
+        end_unix_ms: row.get(26)?,
+        start_timestamp_ns: row.get(27)?,
+        end_timestamp_ns: row.get(28)?,
+        duration_secs: row.get(29)?,
+        hits: row.get(30)?,
+        shots: row.get(31)?,
+        misses: row.get(32)?,
+        score_secs: row.get(33)?,
+        accuracy: row.get(34)?,
+    })
+}
+
+fn query_target_events(
+    connection: &Connection,
+    trial_id: &str,
+) -> Result<Vec<AimTargetEventRecord>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+SELECT target_id, event_index, timestamp_ns, event_type, position_x, position_y,
+       position_z, yaw_deg, pitch_deg, velocity_x, velocity_y, velocity_z,
+       event_data_json
+FROM aim_target_events
+WHERE trial_id = ?1
+ORDER BY timestamp_ns, event_index
+"#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([trial_id], |row| {
+            Ok(AimTargetEventRecord {
+                target_id: row.get(0)?,
+                event_index: row.get(1)?,
+                timestamp_ns: row.get(2)?,
+                event_type: row.get(3)?,
+                position_x: row.get(4)?,
+                position_y: row.get(5)?,
+                position_z: row.get(6)?,
+                yaw_deg: row.get(7)?,
+                pitch_deg: row.get(8)?,
+                velocity_x: row.get(9)?,
+                velocity_y: row.get(10)?,
+                velocity_z: row.get(11)?,
+                event_data_json: row.get(12)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
+}
+
+fn query_shots(connection: &Connection, trial_id: &str) -> Result<Vec<AimShotRecord>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+SELECT shot_index, timestamp_ns, hit, yaw_deg, pitch_deg, target_x, target_y,
+       target_z, target_radius, target_id
+FROM aim_shots
+WHERE trial_id = ?1
+ORDER BY timestamp_ns, shot_index
+"#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([trial_id], |row| {
+            Ok(AimShotRecord {
+                shot_index: row.get(0)?,
+                timestamp_ns: row.get(1)?,
+                hit: row.get(2)?,
+                yaw_deg: row.get(3)?,
+                pitch_deg: row.get(4)?,
+                target_x: row.get(5)?,
+                target_y: row.get(6)?,
+                target_z: row.get(7)?,
+                target_radius: row.get(8)?,
+                target_id: row.get(9)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
+}
+
+fn query_camera_samples(
+    connection: &Connection,
+    trial_id: &str,
+) -> Result<Vec<AimCameraSampleRecord>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+SELECT timestamp_ns, yaw_deg, pitch_deg, yaw_delta_deg, pitch_delta_deg
+FROM aim_camera_samples
+WHERE trial_id = ?1
+ORDER BY timestamp_ns
+"#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([trial_id], |row| {
+            Ok(AimCameraSampleRecord {
+                timestamp_ns: row.get(0)?,
+                yaw_deg: row.get(1)?,
+                pitch_deg: row.get(2)?,
+                yaw_delta_deg: row.get(3)?,
+                pitch_delta_deg: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
 }
 
 fn add_column_if_missing(
