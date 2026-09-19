@@ -62,6 +62,14 @@ impl ProcessorTimingState {
         self.last_raw_timestamp_ns = Some(timestamp_ns);
         dt_s
     }
+
+    pub fn reset(&mut self) {
+        self.last_raw_timestamp_ns = None;
+    }
+}
+
+fn screen_accepts_mouse(screen: LabScreen) -> bool {
+    matches!(screen, LabScreen::Playing | LabScreen::Validating)
 }
 
 pub fn drain_mouse_to_camera(
@@ -80,7 +88,7 @@ pub fn drain_mouse_to_camera(
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
     // Paused/lobby input is intentionally discarded without aborting the trial.
-    if !look.enabled || ui.screen != LabScreen::Playing {
+    if !look.enabled || !screen_accepts_mouse(ui.screen) {
         return;
     }
     let accumulate_stats = validation.is_running();
@@ -271,6 +279,16 @@ mod tests {
         assert_eq!(timing.dt_s_for(1_000_000_000), 0.0);
         assert!((timing.dt_s_for(1_004_000_000) - 0.004).abs() < f64::EPSILON);
         assert_eq!(timing.last_raw_timestamp_ns, Some(1_004_000_000));
+        timing.reset();
+        assert_eq!(timing.dt_s_for(9_000_000_000), 0.0);
+    }
+
+    #[test]
+    fn mouse_drain_accepts_playing_and_validating_only() {
+        assert!(screen_accepts_mouse(LabScreen::Playing));
+        assert!(screen_accepts_mouse(LabScreen::Validating));
+        assert!(!screen_accepts_mouse(LabScreen::Lobby));
+        assert!(!screen_accepts_mouse(LabScreen::Paused));
     }
 
     #[test]

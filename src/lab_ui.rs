@@ -11,6 +11,7 @@ pub enum LabScreen {
     Lobby,
     Playing,
     Paused,
+    Validating,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -41,6 +42,7 @@ pub struct LabUi {
     pub nested: LabNested,
     pub selected_task: AimTaskKind,
     pub detail_overlay: bool,
+    pub validation_look_enabled: bool,
     pub last_result: Option<LightweightResult>,
 }
 
@@ -51,6 +53,7 @@ impl Default for LabUi {
             nested: LabNested::None,
             selected_task: AimTaskKind::StaticClick,
             detail_overlay: false,
+            validation_look_enabled: false,
             last_result: None,
         }
     }
@@ -81,11 +84,15 @@ pub fn handle_lab_keys(
             ui.nested = LabNested::None;
             ui.screen = LabScreen::Playing;
         }
+        LabScreen::Validating => {
+            ui.validation_look_enabled = !ui.validation_look_enabled;
+        }
     }
 }
 
 pub fn look_should_be_enabled(ui: &LabUi) -> bool {
     ui.screen == LabScreen::Playing
+        || (ui.screen == LabScreen::Validating && ui.validation_look_enabled)
 }
 
 pub fn enter_playing_after_start(ui: &mut LabUi, started: bool) {
@@ -123,7 +130,7 @@ pub fn settings_are_locked(aim_phase: AimPhase, validation: ValidationState) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aim_trial::{AimPhase, AimTaskKind, AimTrial};
+    use crate::aim_trial::{AimPhase, AimTaskKind, AimTrial, LiveAimTarget};
     use bevy::input::ButtonInput;
     use bevy::prelude::KeyCode;
 
@@ -150,6 +157,7 @@ mod tests {
         assert_eq!(ui.nested, LabNested::None);
         assert_eq!(ui.selected_task, AimTaskKind::StaticClick);
         assert!(!ui.detail_overlay);
+        assert!(!ui.validation_look_enabled);
         assert!(ui.last_result.is_none());
         assert!(!look_should_be_enabled(&ui));
     }
@@ -183,6 +191,26 @@ mod tests {
         };
         let mut aim = armed_trial();
         aim.paused_at_qpc = Some(11_000);
+        aim.live_targets.push(LiveAimTarget {
+            target_id: "target_001".into(),
+            row: 0,
+            col: 0,
+            center: Vec3::NEG_Z,
+        });
+        aim.hits = 2;
+        aim.push_aim_input_sample(10_000, 1, 0, 1.0, 0.0, 0, None, None);
+        aim.shot_log.push(sense_types::AimShotRecord {
+            shot_index: 0,
+            timestamp_ns: 10_000,
+            hit: true,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            target_x: 0.0,
+            target_y: 0.0,
+            target_z: -1.0,
+            target_radius: 1.0,
+            target_id: "target_001".into(),
+        });
         let keys = pressed(KeyCode::Escape);
 
         handle_lab_keys(&keys, &mut ui, &mut aim, 31_000);
@@ -192,7 +220,33 @@ mod tests {
         assert_eq!(aim.phase, AimPhase::Armed);
         assert_eq!(aim.paused_at_qpc, None);
         assert_eq!(aim.accumulated_pause_ns, 20_000);
+        assert_eq!(aim.random_seed, 42);
+        assert_eq!(aim.live_targets.len(), 1);
+        assert_eq!(aim.hits, 2);
+        assert_eq!(aim.shot_log.len(), 1);
+        assert_eq!(aim.input_log.len(), 1);
+        assert_eq!(aim.start_timestamp_ns, 1_000);
         assert!(look_should_be_enabled(&ui));
+    }
+
+    #[test]
+    fn escape_toggles_look_while_validating_without_pausing_aim() {
+        let mut ui = LabUi {
+            screen: LabScreen::Validating,
+            nested: LabNested::LabTools,
+            ..Default::default()
+        };
+        let mut aim = armed_trial();
+        let keys = pressed(KeyCode::Escape);
+
+        handle_lab_keys(&keys, &mut ui, &mut aim, 11_000);
+        assert_eq!(ui.screen, LabScreen::Validating);
+        assert!(look_should_be_enabled(&ui));
+        assert_eq!(aim.paused_at_qpc, None);
+
+        handle_lab_keys(&keys, &mut ui, &mut aim, 12_000);
+        assert!(!look_should_be_enabled(&ui));
+        assert_eq!(aim.paused_at_qpc, None);
     }
 
     #[test]
@@ -266,6 +320,7 @@ mod tests {
             nested: LabNested::None,
             selected_task: AimTaskKind::Gridshot,
             detail_overlay: true,
+            validation_look_enabled: false,
             last_result: None,
         };
         let mut aim = AimTrial::default();

@@ -55,14 +55,14 @@ Opens the Validation Lab window (1280×720 default).
 **Cursor / UI control**
 
 - Starts in **UI mode** (cursor free) so you can click Start / Reset / End.
-- In **Validation Lab** (Lab tools): press **Esc** to enter **look mode** (cursor locked) for yaw/pitch look and horizontal 360° validation; press **Esc** again to unlock.
+- After **Start Validation**, the app enters **Validating**: press **Esc** to toggle **look mode** (cursor locked) for yaw/pitch look and horizontal 360° sampling; press **Esc** again to unlock. This never pauses an aim trial.
 - In **aim tasks** (Playing): **Esc** pauses the trial (clock frozen, no shots); **Esc** again resumes. Esc never cancels an Armed trial — use Restart / Change trial / Exit from Pause Home.
 - While the cursor is unlocked, mouse movement is not applied to the camera and is not counted toward validation or aim gameplay.
 
 ### Validation Lab workflow
 
 1. (UI mode) **Start Validation** — creates session/config in `data/sense_maxer.db`, resets counters and buffers.
-2. Press **Esc** to lock cursor (look mode).
+2. Press **Esc** to lock the cursor (Validating look mode).
 3. **Reset Camera** if needed — unlock with Esc first if you are in look mode.
 4. Perform **one continuous horizontal 360°** in a single direction without reversing.
 5. Press **Esc** to unlock cursor, then **End Validation**.

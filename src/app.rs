@@ -70,9 +70,14 @@ fn handle_lab_ui_keys(
     mut ui: ResMut<LabUi>,
     mut aim: ResMut<AimTrial>,
     mut look: ResMut<LookCapture>,
+    mut timing: ResMut<ProcessorTimingState>,
 ) {
     let now = sense_input_win::monotonic_now_ns();
+    let was_paused = ui.screen == crate::lab_ui::LabScreen::Paused;
     handle_lab_keys(&keys, &mut ui, &mut aim, now);
+    if was_paused && ui.screen == crate::lab_ui::LabScreen::Playing {
+        timing.reset();
+    }
     look.enabled = look_should_be_enabled(&ui);
 }
 

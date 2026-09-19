@@ -10,7 +10,9 @@ use crate::{
         active_elapsed_ns, cancel_aim_trial, end_aim_pause, start_aim_trial, AimPhase,
         AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_EXPERIMENT_VERSION, AIM_HITS_TO_FINISH,
     },
-    camera_ctrl::{ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch},
+    camera_ctrl::{
+        reset_camera, ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch,
+    },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
@@ -18,7 +20,10 @@ use crate::{
         enter_playing_after_start, settings_are_locked, LabNested, LabScreen, LabUi,
         LightweightResult,
     },
-    session::{database_path, end_validation, start_validation, unix_time_ms, ValidationSession},
+    session::{
+        database_path, end_validation, reset_counters, start_validation, unix_time_ms,
+        ValidationSession,
+    },
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +38,8 @@ enum HudAction {
     Exit,
     StartValidation,
     EndValidation,
+    ResetCamera,
+    ResetCounters,
 }
 
 pub fn draw_hud(
@@ -94,11 +101,12 @@ pub fn draw_hud(
                     ui,
                     &mut lab_ui,
                     !validation.is_running() && aim.phase == AimPhase::Idle,
+                    &session,
                     &mut action,
                 );
             }
             LabNested::PauseHome if lab_ui.screen == LabScreen::Paused => {
-                draw_pause_home(ui, &aim, &mut action);
+                draw_pause_home(ui, &aim, &session, &mut action);
             }
             LabNested::Settings => {
                 draw_settings(ui, &mut settings, settings_locked);
@@ -132,6 +140,7 @@ pub fn draw_hud(
         }
         Some(HudAction::Resume) => {
             end_aim_pause(&mut aim, sense_input_win::monotonic_now_ns());
+            timing.reset();
             lab_ui.screen = LabScreen::Playing;
             lab_ui.nested = LabNested::None;
             look.enabled = true;
@@ -190,6 +199,11 @@ pub fn draw_hud(
                     &mut timing,
                 ) {
                     session.status_message = Some(format!("Start failed: {error}"));
+                } else {
+                    lab_ui.screen = LabScreen::Validating;
+                    lab_ui.nested = LabNested::LabTools;
+                    lab_ui.validation_look_enabled = false;
+                    look.enabled = false;
                 }
             }
         }
@@ -204,6 +218,28 @@ pub fn draw_hud(
                 &active_processor,
             ) {
                 session.status_message = Some(format!("End failed: {error}"));
+            } else {
+                lab_ui.screen = LabScreen::Lobby;
+                lab_ui.nested = LabNested::LabTools;
+                lab_ui.validation_look_enabled = false;
+                look.enabled = false;
+            }
+        }
+        Some(HudAction::ResetCamera) => {
+            reset_camera(
+                &mut pose,
+                &mut buffers,
+                *validation,
+                sense_input_win::monotonic_now_ns(),
+            );
+            session.status_message = Some("Camera reset.".into());
+        }
+        Some(HudAction::ResetCounters) => {
+            match reset_counters(&mut live_input, &mut buffers, &integrity, &mut timing) {
+                Ok(()) => session.status_message = Some("Validation counters reset.".into()),
+                Err(error) => {
+                    session.status_message = Some(format!("Counter reset failed: {error}"))
+                }
             }
         }
         None => {}
@@ -216,6 +252,7 @@ fn draw_lobby(
     ui: &mut egui::Ui,
     lab_ui: &mut LabUi,
     can_start: bool,
+    session: &ValidationSession,
     action: &mut Option<HudAction>,
 ) {
     ui.heading("Validation Lab");
@@ -249,6 +286,10 @@ fn draw_lobby(
         ui.separator();
         draw_last_result(ui, result);
     }
+    if let Some(message) = &session.status_message {
+        ui.separator();
+        ui.label(message);
+    }
 }
 
 fn draw_last_result(ui: &mut egui::Ui, result: &LightweightResult) {
@@ -267,7 +308,12 @@ fn draw_last_result(ui: &mut egui::Ui, result: &LightweightResult) {
     }
 }
 
-fn draw_pause_home(ui: &mut egui::Ui, aim: &AimTrial, action: &mut Option<HudAction>) {
+fn draw_pause_home(
+    ui: &mut egui::Ui,
+    aim: &AimTrial,
+    session: &ValidationSession,
+    action: &mut Option<HudAction>,
+) {
     ui.label(match aim.task_kind {
         AimTaskKind::StaticClick => "Static Click is paused.",
         AimTaskKind::Gridshot => "Gridshot is paused.",
@@ -290,6 +336,10 @@ fn draw_pause_home(ui: &mut egui::Ui, aim: &AimTrial, action: &mut Option<HudAct
     }
     if ui.button("Exit").clicked() {
         *action = Some(HudAction::Exit);
+    }
+    if let Some(message) = &session.status_message {
+        ui.separator();
+        ui.label(message);
     }
 }
 
@@ -389,6 +439,13 @@ fn draw_settings(ui: &mut egui::Ui, settings: &mut ExperimentSettings, locked: b
                 );
             });
         }
+        ui.separator();
+        ui.monospace(format!(
+            "eDPI: {:.1} · counts/360: {:.1} · cm/360: {:.2}",
+            sense_math::edpi(settings.dpi, settings.sensitivity),
+            sense_math::counts_per_360(settings.sensitivity),
+            sense_math::cm_per_360(settings.dpi, settings.sensitivity),
+        ));
     });
 }
 
@@ -430,6 +487,14 @@ fn draw_lab_tools(
             *action = Some(HudAction::EndValidation);
         }
     });
+    ui.horizontal(|ui| {
+        if ui.button("Reset Camera").clicked() {
+            *action = Some(HudAction::ResetCamera);
+        }
+        if ui.button("Reset Counters").clicked() {
+            *action = Some(HudAction::ResetCounters);
+        }
+    });
     ui.monospace(format!(
         "STATE: {}",
         if validation.is_running() {
@@ -445,8 +510,12 @@ fn draw_lab_tools(
         ui.separator();
         ui.strong("Last validation result");
         ui.monospace(format!(
-            "Observed: {:+.3}° · error {:+.4}%",
-            result.observed_degrees, result.error_percent
+            "Counts expected: {:.3} · observed net: {:+.3} · path: {:.3}",
+            result.expected_counts, result.observed_net_counts, result.observed_abs_path_counts,
+        ));
+        ui.monospace(format!(
+            "Degrees expected: {:.3}° · observed: {:+.3}° · error {:+.4}%",
+            result.expected_degrees, result.observed_degrees, result.error_percent
         ));
         ui.monospace(format!(
             "Samples: {} · gaps: {} · suspect: {}",
@@ -455,7 +524,10 @@ fn draw_lab_tools(
             result.integrity.is_pipeline_suspect(),
         ));
     }
-    if ui.button("Back").clicked() {
+    if ui
+        .add_enabled(!validation.is_running(), egui::Button::new("Back"))
+        .clicked()
+    {
         *action = Some(HudAction::Back);
     }
 }

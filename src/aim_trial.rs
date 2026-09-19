@@ -384,6 +384,9 @@ pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
     if let Some(at) = trial.paused_at_qpc.take() {
         trial.accumulated_pause_ns =
             trial.accumulated_pause_ns.saturating_add(now_ns.saturating_sub(at));
+        // The first post-resume sample starts a fresh input interval; otherwise
+        // its raw dt includes the entire pause.
+        trial.last_raw_timestamp_ns = None;
     }
 }
 
@@ -855,6 +858,43 @@ mod tests {
     }
 
     #[test]
+    fn fifth_hit_score_excludes_pause_between_hits() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let start = 5_000_000_000u64;
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            42,
+            test_config(),
+        ));
+        for i in 0..AIM_HITS_TO_FINISH {
+            if i == 2 {
+                begin_aim_pause(&mut trial, start + 250_000_000);
+                end_aim_pause(&mut trial, start + 30_250_000_000);
+            }
+            trial.current_center = front_cone_center(0.0, 0.0);
+            pose.yaw_deg = 0.0;
+            pose.pitch_deg = 0.0;
+            let timestamp_ns = if i < 2 {
+                start + (i as u64 + 1) * 100_000_000
+            } else {
+                start + 30_000_000_000 + (i as u64 + 1) * 100_000_000
+            };
+            apply_aim_shot(
+                &mut trial,
+                &pose,
+                timestamp_ns,
+            );
+        }
+
+        assert!((trial.score_secs.expect("score") - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
     fn cancel_armed_clears_run_without_persist_ok() {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
@@ -1323,6 +1363,7 @@ mod tests {
         let mut trial = AimTrial::default();
         trial.phase = AimPhase::Armed;
         trial.start_timestamp_ns = 1_000;
+        trial.push_aim_input_sample(2_000, 1, 0, 1.0, 0.0, 0, None, None);
         // play 10s
         assert_eq!(active_elapsed_ns(&trial, 1_000 + 10_000_000_000), 10_000_000_000);
         begin_aim_pause(&mut trial, 1_000 + 10_000_000_000);
@@ -1331,6 +1372,7 @@ mod tests {
         end_aim_pause(&mut trial, 1_000 + 40_000_000_000);
         // +5s more play → 15s active
         assert_eq!(active_elapsed_ns(&trial, 1_000 + 45_000_000_000), 15_000_000_000);
+        assert_eq!(trial.next_input_dt_ns(1_000 + 40_000_000_001), 0);
     }
 
     #[test]
@@ -1359,6 +1401,8 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
+        trial.accumulated_pause_ns = 123;
+        trial.paused_at_qpc = Some(456);
         assert!(start_aim_trial(
             &mut pose,
             &mut trial,
@@ -1368,15 +1412,21 @@ mod tests {
             42,
             test_config(),
         ));
+        assert_eq!(trial.accumulated_pause_ns, 0);
+        assert_eq!(trial.paused_at_qpc, None);
 
         trial.push_aim_input_sample(now + 1, 1, 0, 1.0, 0.0, 0, None, None);
         trial.push_aim_camera_sample(now + 1, 0.1, 0.0);
+        trial.accumulated_pause_ns = 789;
+        trial.paused_at_qpc = Some(now + 2);
         assert!(!trial.input_log.is_empty());
         assert!(!trial.camera_log.is_empty());
 
         cancel_aim_trial(&mut trial);
         assert!(trial.input_log.is_empty());
         assert!(trial.camera_log.is_empty());
+        assert_eq!(trial.accumulated_pause_ns, 0);
+        assert_eq!(trial.paused_at_qpc, None);
 
         // Restart must also clear any leftover (and reset seq/timing).
         trial.input_log.push(AimInputSampleRecord {
