@@ -109,11 +109,19 @@ pub fn drain_mouse_to_camera(
         } else {
             live.has_accel_debug = false;
         }
+        let look_sensitivity = if aim.phase == AimPhase::Armed {
+            aim.config_snapshot
+                .as_ref()
+                .map(|snap| snap.sensitivity)
+                .unwrap_or(settings.sensitivity)
+        } else {
+            settings.sensitivity
+        };
         let camera_sample = apply_sample(
             &sample,
             processed_dx,
             processed_dy,
-            settings.sensitivity,
+            look_sensitivity,
             &mut camera,
             &mut live,
             accumulate_stats,
