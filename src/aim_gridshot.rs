@@ -77,16 +77,22 @@ pub fn pick_initial_cells(rng: &mut u64) -> [(i32, i32); 3] {
     out
 }
 
-/// Uniform pick among currently vacant cells (assumes at least one vacant).
-pub fn pick_vacant_cell(rng: &mut u64, occupied: &[(i32, i32)]) -> (i32, i32) {
+/// Uniform pick among vacant cells. `exclude` is never chosen (e.g. the cell just
+/// destroyed) so a replacement cannot visually “stick” on the same spot.
+pub fn pick_vacant_cell(
+    rng: &mut u64,
+    occupied: &[(i32, i32)],
+    exclude: Option<(i32, i32)>,
+) -> (i32, i32) {
     let vacant: Vec<(i32, i32)> = GRIDSHOT_CELLS
         .iter()
         .copied()
         .filter(|c| !occupied.contains(c))
+        .filter(|c| exclude.map_or(true, |ex| *c != ex))
         .collect();
     assert!(
         !vacant.is_empty(),
-        "pick_vacant_cell requires at least one vacant cell"
+        "pick_vacant_cell requires at least one eligible vacant cell"
     );
     vacant[next_index(rng, vacant.len())]
 }
@@ -354,7 +360,11 @@ pub fn apply_gridshot_shot(
         .iter()
         .map(|t| (t.row, t.col))
         .collect();
-    let (row, col) = pick_vacant_cell(&mut trial.rng_state, &occupied);
+    let (row, col) = pick_vacant_cell(
+        &mut trial.rng_state,
+        &occupied,
+        Some((victim.row, victim.col)),
+    );
     let replacement = alloc_live_target(trial, row, col);
     push_gridshot_spawn(trial, &replacement, timestamp_ns);
     trial.current_center = replacement.center;
@@ -471,10 +481,22 @@ mod tests {
         let occupied = [(-1, 0), (0, 0), (1, 1)];
         let mut rng = 7u64;
         for _ in 0..40 {
-            let (r, c) = pick_vacant_cell(&mut rng, &occupied);
+            let (r, c) = pick_vacant_cell(&mut rng, &occupied, None);
             assert!(!occupied.contains(&(r, c)), "picked occupied ({r},{c})");
             assert!((-1..=1).contains(&r));
             assert!((-1..=1).contains(&c));
+        }
+    }
+
+    #[test]
+    fn pick_vacant_excludes_destroyed_cell() {
+        let occupied = [(-1, 0), (1, 1)]; // after remove; destroyed was (0,0)
+        let destroyed = (0, 0);
+        let mut rng = 11u64;
+        for _ in 0..60 {
+            let (r, c) = pick_vacant_cell(&mut rng, &occupied, Some(destroyed));
+            assert_ne!((r, c), destroyed);
+            assert!(!occupied.contains(&(r, c)));
         }
     }
 
@@ -579,6 +601,15 @@ mod tests {
             .live_targets
             .iter()
             .any(|t| t.target_id == victim.target_id));
+        assert!(
+            !trial
+                .live_targets
+                .iter()
+                .any(|t| t.row == victim.row && t.col == victim.col),
+            "replacement must not reuse destroyed cell ({},{})",
+            victim.row,
+            victim.col
+        );
         let after_ids: Vec<_> = trial
             .live_targets
             .iter()
