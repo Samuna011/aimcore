@@ -217,17 +217,43 @@ Most important stream for future analysis. Buffer for the whole Armed trial; flu
 | Column | Notes |
 |--------|--------|
 | `trial_id` | FK |
-| `timestamp_ns` | Sample time |
+| `timestamp_ns` | **Actual QPC timestamp** of this raw sample (not a clamped clock) |
 | `sequence_number` | Per-trial monotonic |
 | `raw_dx` / `raw_dy` | WM_INPUT counts |
 | `processed_dx` / `processed_dy` | After processor |
-| `dt_ns` | Interval used for this sample (from QPC deltas) |
-| `input_speed` | Counts/ms (or agreed unit) after dt clamp when available; NULL if N/A |
+| `dt_ns` | **Raw** QPC interval between this sample and the previous raw sample (`timestamp_ns - prev_timestamp_ns`). First sample in a trial: `0` or NULL (document choice in impl; prefer `0` with `sequence_number == 0`). **Never overwrite with the clamped interval.** |
+| `dt_used_ns` | Processor’s **effective** interval after any speed-path floor/clamp (see below). Stored explicitly so analysis does not depend on silently re-deriving clamp rules. |
+| `input_speed` | Speed calculated using **`dt_used_ns`** (not raw `dt_ns`); NULL if N/A / bypass |
 | `acceleration_scale` | Linear scale factor when available; `1.0` / NULL for `none` |
 
 Do **not** repeat full `processor_id` on every row (frozen on `aim_trials`).
 
-Optional later (not required v1 columns): `effective_gain`, `cap_x_applied`, `cap_y_applied`, `dt_used` if not already recoverable from `dt_ns` + config — prefer extending only when Linear debug state already exposes them cheaply; otherwise keep regenerable from raw+config.
+### `dt_ns` vs `dt_used_ns` (locked)
+
+```
+timestamp_ns  = actual QPC timestamp of the raw sample
+dt_ns         = raw QPC interval to previous raw sample
+dt_used_ns    = processor effective interval after 1000 Hz floor / clamp
+input_speed   = f(raw_dx, raw_dy, dt_used_ns)   // never use clamped value as dt_ns
+```
+
+**Do not** store the clamped interval in `dt_ns`. Raw timing stays permanent; processor behavior stays reproducible via `dt_used_ns` + frozen `processor_config_json`.
+
+### M2.x recoverability (documented, not “polling_rate_hz encodes it” hand-waving)
+
+Current Linear speed-path clamp (`sense-accel::clamp_speed_dt_ms`):
+
+1. `raw_dt_ms = dt_ns / 1e6` (from raw QPC interval).
+2. `min_ms = if polling_rate_hz > 0 { 1000.0 / polling_rate_hz } else { RA_DEFAULT_TIME_MIN_MS }`  
+   (`RA_DEFAULT_TIME_MIN_MS` = official RA default when poll is unset — see `sense-accel`).
+3. `dt_used_ms = raw_dt_ms.clamp(min_ms, RA_DEFAULT_TIME_MAX_MS)`.
+4. `dt_used_ns = dt_used_ms * 1e6`.
+
+`polling_rate_hz` on the trial snapshot (and inside `processor_config_json`) is the parameter to that formula, together with the **versioned** clamp constants in `sense-accel`. If clamp constants or formula change, bump `processor_version` (and/or experiment version) so old rows remain interpretable.
+
+Storing `dt_used_ns` on each sample is required in M3.y so offline tools need not reimplement the clamp to read historical speeds; the formula above is the **definition** that writers must match and that auditors can verify (`dt_used_ns` ≈ clamp(`dt_ns`)).
+
+Optional later columns (only if Linear already exposes them cheaply): `effective_gain`, `cap_x_applied`, `cap_y_applied`. Prefer regenerable from raw + config when not free.
 
 ---
 
@@ -305,6 +331,7 @@ Migrate: `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE` additive columns for exist
 ## Stop criteria
 
 - Spec implemented for STATIC_CLICK with full snapshot + four child streams  
-- Lossless raw/event principle documented and followed  
+- Lossless raw/event principle followed (`dt_ns` raw vs `dt_used_ns` clamped, both persisted)  
 - Derived metrics not primary columns  
-- Stop — next work is task designs (Gridshot/etc.) **on top of** this model, not before
+- Stated automated tests + manual DB verification pass  
+- **Stop** — do **not** expand the telemetry layer further; next work is a **task-specific** spec (Gridshot / 1wall6 / tracking) on top of this model
