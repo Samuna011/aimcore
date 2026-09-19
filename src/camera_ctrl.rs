@@ -289,6 +289,8 @@ mod tests {
         assert!(screen_accepts_mouse(LabScreen::Validating));
         assert!(!screen_accepts_mouse(LabScreen::Lobby));
         assert!(!screen_accepts_mouse(LabScreen::Paused));
+        assert!(!screen_accepts_mouse(LabScreen::HistoryList));
+        assert!(!screen_accepts_mouse(LabScreen::HistoryReplay));
     }
 
     #[test]

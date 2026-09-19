@@ -1,6 +1,31 @@
 use std::collections::BTreeMap;
 
+use bevy::prelude::Resource;
+use sense_telemetry::{AimTrialReplayBundle, AimTrialSummary};
 use sense_types::{AimCameraSampleRecord, AimShotRecord, AimTargetEventRecord};
+
+#[derive(Resource, Debug)]
+pub struct AimReplay {
+    pub bundle: Option<AimTrialReplayBundle>,
+    pub summaries: Vec<AimTrialSummary>,
+    pub playing: bool,
+    pub speed: f32,
+    pub t_ns: u64,
+    pub load_error: Option<String>,
+}
+
+impl Default for AimReplay {
+    fn default() -> Self {
+        Self {
+            bundle: None,
+            summaries: Vec::new(),
+            playing: false,
+            speed: 1.0,
+            t_ns: 0,
+            load_error: None,
+        }
+    }
+}
 
 pub fn camera_pose_at(samples: &[AimCameraSampleRecord], t_ns: u64) -> (f64, f64) {
     samples
@@ -10,10 +35,7 @@ pub fn camera_pose_at(samples: &[AimCameraSampleRecord], t_ns: u64) -> (f64, f64
         .map_or((0.0, 0.0), |sample| (sample.yaw_deg, sample.pitch_deg))
 }
 
-pub fn live_targets_at(
-    events: &[AimTargetEventRecord],
-    t_ns: u64,
-) -> Vec<(String, f64, f64, f64)> {
+pub fn live_targets_at(events: &[AimTargetEventRecord], t_ns: u64) -> Vec<(String, f64, f64, f64)> {
     let mut live_targets = BTreeMap::new();
     for event in events.iter().filter(|event| event.timestamp_ns <= t_ns) {
         match event.event_type.as_str() {
@@ -35,11 +57,7 @@ pub fn live_targets_at(
         .collect()
 }
 
-pub fn shots_crossed(
-    shots: &[AimShotRecord],
-    prev_t: u64,
-    t_ns: u64,
-) -> Vec<&AimShotRecord> {
+pub fn shots_crossed(shots: &[AimShotRecord], prev_t: u64, t_ns: u64) -> Vec<&AimShotRecord> {
     shots
         .iter()
         .filter(|shot| prev_t < shot.timestamp_ns && shot.timestamp_ns <= t_ns)
@@ -50,7 +68,7 @@ pub fn shots_crossed(
 mod tests {
     use sense_types::{AimCameraSampleRecord, AimShotRecord, AimTargetEventRecord};
 
-    use super::{camera_pose_at, live_targets_at, shots_crossed};
+    use super::{camera_pose_at, live_targets_at, shots_crossed, AimReplay};
 
     fn camera_sample(timestamp_ns: u64, yaw_deg: f64, pitch_deg: f64) -> AimCameraSampleRecord {
         AimCameraSampleRecord {
@@ -102,11 +120,19 @@ mod tests {
     }
 
     #[test]
+    fn replay_defaults_to_normal_speed_stopped_and_unloaded() {
+        let replay = AimReplay::default();
+
+        assert_eq!(replay.speed, 1.0);
+        assert!(!replay.playing);
+        assert_eq!(replay.t_ns, 0);
+        assert!(replay.bundle.is_none());
+        assert!(replay.load_error.is_none());
+    }
+
+    #[test]
     fn camera_pose_holds_latest_sample_at_or_before_time() {
-        let samples = vec![
-            camera_sample(100, 1.0, -1.0),
-            camera_sample(200, 2.0, -2.0),
-        ];
+        let samples = vec![camera_sample(100, 1.0, -1.0), camera_sample(200, 2.0, -2.0)];
 
         assert_eq!(camera_pose_at(&samples, 99), (0.0, 0.0));
         assert_eq!(camera_pose_at(&samples, 100), (1.0, -1.0));
@@ -127,10 +153,7 @@ mod tests {
 
         assert_eq!(
             live_targets_at(&events, 125),
-            vec![
-                ("a".into(), 4.0, 5.0, 6.0),
-                ("b".into(), 1.0, 2.0, 3.0),
-            ]
+            vec![("a".into(), 4.0, 5.0, 6.0), ("b".into(), 1.0, 2.0, 3.0),]
         );
         assert_eq!(
             live_targets_at(&events, 140),

@@ -5,7 +5,7 @@ use std::{
 };
 
 use bevy::prelude::Resource;
-use sense_telemetry::TelemetryDb;
+use sense_telemetry::{AimTrialReplayBundle, AimTrialSummary, TelemetryDb};
 use sense_types::{
     AccelerationConfig, ConfigurationRecord, DisplayConfig, InputIntegrityReport, SessionRecord,
     ValidationResult,
@@ -45,6 +45,14 @@ pub fn next_config_id(seq: u32) -> String {
 
 pub fn database_path() -> PathBuf {
     PathBuf::from(DATABASE_PATH)
+}
+
+pub fn load_aim_history_summaries() -> Result<Vec<AimTrialSummary>, String> {
+    open_database()?.list_aim_trials_summary(100)
+}
+
+pub fn load_aim_history_replay(id: &str) -> Result<AimTrialReplayBundle, String> {
+    open_database()?.load_aim_trial_bundle(id)
 }
 
 pub fn validation_result(

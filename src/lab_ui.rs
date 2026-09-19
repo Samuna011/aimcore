@@ -1,7 +1,10 @@
 use bevy::prelude::*;
+use sense_telemetry::AimTrialReplayBundle;
 
 use crate::{
+    aim_replay::AimReplay,
     aim_trial::{begin_aim_pause, end_aim_pause, AimPhase, AimTaskKind, AimTrial},
+    camera_ctrl::YawPitch,
     config::ValidationState,
 };
 
@@ -12,6 +15,8 @@ pub enum LabScreen {
     Playing,
     Paused,
     Validating,
+    HistoryList,
+    HistoryReplay,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,6 +69,7 @@ pub fn handle_lab_keys(
     keys: &ButtonInput<KeyCode>,
     ui: &mut LabUi,
     aim: &mut AimTrial,
+    replay: &mut AimReplay,
     now_ns: u64,
 ) {
     if keys.just_pressed(KeyCode::KeyV) && ui.screen == LabScreen::Playing {
@@ -86,6 +92,10 @@ pub fn handle_lab_keys(
         }
         LabScreen::Validating => {
             ui.validation_look_enabled = !ui.validation_look_enabled;
+        }
+        LabScreen::HistoryList => {}
+        LabScreen::HistoryReplay => {
+            replay.playing = !replay.playing;
         }
     }
 }
@@ -127,10 +137,38 @@ pub fn settings_are_locked(aim_phase: AimPhase, validation: ValidationState) -> 
     aim_phase == AimPhase::Armed || validation.is_running()
 }
 
+pub fn enter_history_list(ui: &mut LabUi) {
+    ui.screen = LabScreen::HistoryList;
+    ui.nested = LabNested::None;
+}
+
+pub fn enter_history_replay(ui: &mut LabUi, replay: &mut AimReplay, bundle: AimTrialReplayBundle) {
+    replay.t_ns = bundle.trial.start_timestamp_ns;
+    replay.bundle = Some(bundle);
+    replay.playing = true;
+    replay.speed = 1.0;
+    replay.load_error = None;
+    ui.screen = LabScreen::HistoryReplay;
+    ui.nested = LabNested::None;
+}
+
+pub fn leave_history_replay(ui: &mut LabUi, replay: &mut AimReplay, yaw: &mut YawPitch) {
+    replay.bundle = None;
+    replay.playing = false;
+    replay.t_ns = 0;
+    replay.load_error = None;
+    yaw.yaw_deg = 0.0;
+    yaw.pitch_deg = 0.0;
+    ui.screen = LabScreen::HistoryList;
+    ui.nested = LabNested::None;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aim_replay::AimReplay;
     use crate::aim_trial::{AimPhase, AimTaskKind, AimTrial, LiveAimTarget};
+    use crate::camera_ctrl::YawPitch;
     use bevy::input::ButtonInput;
     use bevy::prelude::KeyCode;
 
@@ -163,15 +201,86 @@ mod tests {
     }
 
     #[test]
+    fn history_screens_disable_live_look() {
+        for screen in [LabScreen::HistoryList, LabScreen::HistoryReplay] {
+            let ui = LabUi {
+                screen,
+                validation_look_enabled: true,
+                ..Default::default()
+            };
+
+            assert!(!look_should_be_enabled(&ui));
+        }
+    }
+
+    #[test]
+    fn escape_toggles_history_replay_playback_only() {
+        let mut ui = LabUi {
+            screen: LabScreen::HistoryReplay,
+            ..Default::default()
+        };
+        let mut aim = armed_trial();
+        let mut replay = AimReplay {
+            playing: true,
+            ..Default::default()
+        };
+        let keys = pressed(KeyCode::Escape);
+
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 11_000);
+
+        assert_eq!(ui.screen, LabScreen::HistoryReplay);
+        assert!(!replay.playing);
+        assert_eq!(aim.phase, AimPhase::Armed);
+        assert_eq!(aim.paused_at_qpc, None);
+
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 12_000);
+        assert!(replay.playing);
+    }
+
+    #[test]
+    fn entering_history_list_and_leaving_replay_reset_state() {
+        let mut ui = LabUi {
+            screen: LabScreen::Lobby,
+            nested: LabNested::Settings,
+            ..Default::default()
+        };
+        enter_history_list(&mut ui);
+        assert_eq!(ui.screen, LabScreen::HistoryList);
+        assert_eq!(ui.nested, LabNested::None);
+
+        ui.screen = LabScreen::HistoryReplay;
+        let mut replay = AimReplay {
+            playing: true,
+            speed: 4.0,
+            t_ns: 42,
+            load_error: Some("old error".into()),
+            ..Default::default()
+        };
+        let mut pose = YawPitch {
+            yaw_deg: 10.0,
+            pitch_deg: -5.0,
+        };
+
+        leave_history_replay(&mut ui, &mut replay, &mut pose);
+
+        assert_eq!(ui.screen, LabScreen::HistoryList);
+        assert_eq!(ui.nested, LabNested::None);
+        assert!(replay.bundle.is_none());
+        assert!(!replay.playing);
+        assert_eq!((pose.yaw_deg, pose.pitch_deg), (0.0, 0.0));
+    }
+
+    #[test]
     fn escape_pauses_without_aborting_trial() {
         let mut ui = LabUi {
             screen: LabScreen::Playing,
             ..Default::default()
         };
         let mut aim = armed_trial();
+        let mut replay = AimReplay::default();
         let keys = pressed(KeyCode::Escape);
 
-        handle_lab_keys(&keys, &mut ui, &mut aim, 11_000);
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 11_000);
 
         assert_eq!(ui.screen, LabScreen::Paused);
         assert_eq!(ui.nested, LabNested::PauseHome);
@@ -190,6 +299,7 @@ mod tests {
             ..Default::default()
         };
         let mut aim = armed_trial();
+        let mut replay = AimReplay::default();
         aim.paused_at_qpc = Some(11_000);
         aim.live_targets.push(LiveAimTarget {
             target_id: "target_001".into(),
@@ -213,7 +323,7 @@ mod tests {
         });
         let keys = pressed(KeyCode::Escape);
 
-        handle_lab_keys(&keys, &mut ui, &mut aim, 31_000);
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 31_000);
 
         assert_eq!(ui.screen, LabScreen::Playing);
         assert_eq!(ui.nested, LabNested::None);
@@ -237,14 +347,15 @@ mod tests {
             ..Default::default()
         };
         let mut aim = armed_trial();
+        let mut replay = AimReplay::default();
         let keys = pressed(KeyCode::Escape);
 
-        handle_lab_keys(&keys, &mut ui, &mut aim, 11_000);
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 11_000);
         assert_eq!(ui.screen, LabScreen::Validating);
         assert!(look_should_be_enabled(&ui));
         assert_eq!(aim.paused_at_qpc, None);
 
-        handle_lab_keys(&keys, &mut ui, &mut aim, 12_000);
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 12_000);
         assert!(!look_should_be_enabled(&ui));
         assert_eq!(aim.paused_at_qpc, None);
     }
@@ -253,9 +364,10 @@ mod tests {
     fn escape_in_lobby_is_noop() {
         let mut ui = LabUi::default();
         let mut aim = armed_trial();
+        let mut replay = AimReplay::default();
         let keys = pressed(KeyCode::Escape);
 
-        handle_lab_keys(&keys, &mut ui, &mut aim, 11_000);
+        handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, 11_000);
 
         assert_eq!(ui.screen, LabScreen::Lobby);
         assert_eq!(ui.nested, LabNested::None);
@@ -267,19 +379,20 @@ mod tests {
     fn v_toggles_detail_only_while_playing() {
         let keys = pressed(KeyCode::KeyV);
         let mut aim = armed_trial();
+        let mut replay = AimReplay::default();
         let mut playing = LabUi {
             screen: LabScreen::Playing,
             ..Default::default()
         };
 
-        handle_lab_keys(&keys, &mut playing, &mut aim, 2_000);
+        handle_lab_keys(&keys, &mut playing, &mut aim, &mut replay, 2_000);
         assert!(playing.detail_overlay);
 
         let mut paused = LabUi {
             screen: LabScreen::Paused,
             ..Default::default()
         };
-        handle_lab_keys(&keys, &mut paused, &mut aim, 2_000);
+        handle_lab_keys(&keys, &mut paused, &mut aim, &mut replay, 2_000);
         assert!(!paused.detail_overlay);
     }
 

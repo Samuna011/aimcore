@@ -6,6 +6,7 @@ use sense_accel::CapMode;
 
 use crate::{
     aim_gridshot::{start_gridshot_trial, GRIDSHOT_CONCURRENT, GRIDSHOT_DURATION_SECS},
+    aim_replay::AimReplay,
     aim_trial::{
         active_elapsed_ns, cancel_aim_trial, end_aim_pause, start_aim_trial, AimPhase,
         AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_EXPERIMENT_VERSION, AIM_HITS_TO_FINISH,
@@ -17,16 +18,16 @@ use crate::{
     frame_telemetry::LiveFrameStats,
     input_plugin::InputIntegrityTracker,
     lab_ui::{
-        enter_playing_after_start, settings_are_locked, LabNested, LabScreen, LabUi,
-        LightweightResult,
+        enter_history_list, enter_history_replay, enter_playing_after_start, leave_history_replay,
+        settings_are_locked, LabNested, LabScreen, LabUi, LightweightResult,
     },
     session::{
-        database_path, end_validation, reset_counters, start_validation, unix_time_ms,
-        ValidationSession,
+        database_path, end_validation, load_aim_history_replay, load_aim_history_summaries,
+        reset_counters, start_validation, unix_time_ms, ValidationSession,
     },
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum HudAction {
     Start,
     Resume,
@@ -40,6 +41,9 @@ enum HudAction {
     EndValidation,
     ResetCamera,
     ResetCounters,
+    OpenHistory,
+    RefreshHistory,
+    ReplayTrial(String),
 }
 
 pub fn draw_hud(
@@ -56,6 +60,7 @@ pub fn draw_hud(
     mut look: ResMut<LookCapture>,
     mut aim: ResMut<AimTrial>,
     mut lab_ui: ResMut<LabUi>,
+    mut replay: ResMut<AimReplay>,
     mut app_exit: MessageWriter<AppExit>,
     processor_runtime: (
         NonSendMut<ActiveInputProcessor>,
@@ -85,6 +90,8 @@ pub fn draw_hud(
     let title = match (lab_ui.screen, lab_ui.nested) {
         (LabScreen::Lobby, LabNested::None) => "Sense Maxer — Lobby",
         (LabScreen::Paused, LabNested::PauseHome) => "Paused",
+        (LabScreen::HistoryList, LabNested::None) => "Aim History",
+        (LabScreen::HistoryReplay, LabNested::None) => "Aim Replay",
         (_, LabNested::Settings) => "Settings",
         (_, LabNested::LabTools) => "Lab tools",
         _ => "Sense Maxer",
@@ -107,6 +114,12 @@ pub fn draw_hud(
             }
             LabNested::PauseHome if lab_ui.screen == LabScreen::Paused => {
                 draw_pause_home(ui, &aim, &session, &mut action);
+            }
+            LabNested::None if lab_ui.screen == LabScreen::HistoryList => {
+                draw_history_list(ui, &replay, &mut action);
+            }
+            LabNested::None if lab_ui.screen == LabScreen::HistoryReplay => {
+                draw_history_replay(ui, &replay, &mut action);
             }
             LabNested::Settings => {
                 draw_settings(ui, &mut settings, settings_locked);
@@ -172,13 +185,22 @@ pub fn draw_hud(
         }
         Some(HudAction::OpenSettings) => lab_ui.nested = LabNested::Settings,
         Some(HudAction::OpenLabTools) => lab_ui.nested = LabNested::LabTools,
-        Some(HudAction::Back) => {
-            lab_ui.nested = if lab_ui.screen == LabScreen::Paused {
-                LabNested::PauseHome
-            } else {
-                LabNested::None
-            };
-        }
+        Some(HudAction::Back) => match lab_ui.screen {
+            LabScreen::HistoryList => {
+                lab_ui.screen = LabScreen::Lobby;
+                lab_ui.nested = LabNested::None;
+            }
+            LabScreen::HistoryReplay => {
+                leave_history_replay(&mut lab_ui, &mut replay, &mut pose);
+            }
+            _ => {
+                lab_ui.nested = if lab_ui.screen == LabScreen::Paused {
+                    LabNested::PauseHome
+                } else {
+                    LabNested::None
+                };
+            }
+        },
         Some(HudAction::Exit) => {
             cancel_aim_trial(&mut aim);
             app_exit.write(AppExit::Success);
@@ -242,6 +264,38 @@ pub fn draw_hud(
                 }
             }
         }
+        Some(HudAction::OpenHistory) => {
+            if aim.phase == AimPhase::Idle && !validation.is_running() {
+                enter_history_list(&mut lab_ui);
+                look.enabled = false;
+                match load_aim_history_summaries() {
+                    Ok(summaries) => {
+                        replay.summaries = summaries;
+                        replay.load_error = None;
+                    }
+                    Err(error) => {
+                        replay.summaries.clear();
+                        replay.load_error = Some(format!("History load failed: {error}"));
+                    }
+                }
+            }
+        }
+        Some(HudAction::RefreshHistory) => match load_aim_history_summaries() {
+            Ok(summaries) => {
+                replay.summaries = summaries;
+                replay.load_error = None;
+            }
+            Err(error) => replay.load_error = Some(format!("History load failed: {error}")),
+        },
+        Some(HudAction::ReplayTrial(id)) => match load_aim_history_replay(&id) {
+            Ok(bundle) => {
+                enter_history_replay(&mut lab_ui, &mut replay, bundle);
+                look.enabled = false;
+            }
+            Err(error) => {
+                replay.load_error = Some(format!("Replay load failed for {id}: {error}"));
+            }
+        },
         None => {}
     }
 
@@ -278,6 +332,12 @@ fn draw_lobby(
         if ui.button("Lab tools").clicked() {
             *action = Some(HudAction::OpenLabTools);
         }
+        if ui
+            .add_enabled(can_start, egui::Button::new("History"))
+            .clicked()
+        {
+            *action = Some(HudAction::OpenHistory);
+        }
         if ui.button("Exit").clicked() {
             *action = Some(HudAction::Exit);
         }
@@ -289,6 +349,66 @@ fn draw_lobby(
     if let Some(message) = &session.status_message {
         ui.separator();
         ui.label(message);
+    }
+}
+
+fn draw_history_list(ui: &mut egui::Ui, replay: &AimReplay, action: &mut Option<HudAction>) {
+    ui.label("Completed aim trials (newest first).");
+    ui.horizontal(|ui| {
+        if ui.button("Refresh").clicked() {
+            *action = Some(HudAction::RefreshHistory);
+        }
+        if ui.button("Back").clicked() {
+            *action = Some(HudAction::Back);
+        }
+    });
+    if let Some(error) = &replay.load_error {
+        ui.colored_label(egui::Color32::LIGHT_RED, error);
+    }
+    ui.separator();
+    if replay.summaries.is_empty() {
+        ui.label("No completed aim trials found.");
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .max_height(520.0)
+        .show(ui, |ui| {
+            for summary in &replay.summaries {
+                ui.horizontal(|ui| {
+                    ui.monospace(format!(
+                        "{} · {} · {}/{} · {:.1}% · {:.3}s · v{} · {}",
+                        summary.id,
+                        summary.trial_type,
+                        summary.hits,
+                        summary.shots,
+                        summary.accuracy * 100.0,
+                        summary.score_secs,
+                        summary.experiment_version,
+                        summary.end_unix_ms,
+                    ));
+                    if ui.button("Replay").clicked() {
+                        *action = Some(HudAction::ReplayTrial(summary.id.clone()));
+                    }
+                });
+            }
+        });
+}
+
+fn draw_history_replay(ui: &mut egui::Ui, replay: &AimReplay, action: &mut Option<HudAction>) {
+    ui.label("Arena replay transport arrives in Task 3.");
+    if let Some(bundle) = replay.bundle.as_ref() {
+        ui.monospace(format!(
+            "{} · {} · {}",
+            bundle.trial.id,
+            bundle.trial.trial_type,
+            if replay.playing { "PLAYING" } else { "PAUSED" },
+        ));
+        ui.small("Esc toggles play/pause.");
+    } else {
+        ui.colored_label(egui::Color32::LIGHT_RED, "Replay bundle is not loaded.");
+    }
+    if ui.button("Back").clicked() {
+        *action = Some(HudAction::Back);
     }
 }
 

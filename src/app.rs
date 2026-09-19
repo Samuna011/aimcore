@@ -7,6 +7,7 @@ use bevy::{
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
+    aim_replay::AimReplay,
     aim_trial::{spawn_aim_arena, spawn_aim_target, sync_aim_target, AimTrial},
     camera_ctrl::{
         apply_yaw_transform, drain_mouse_to_camera, ActiveInputProcessor, LiveInputStats,
@@ -33,6 +34,7 @@ pub fn run() {
         .init_resource::<ValidationSession>()
         .init_resource::<LookCapture>()
         .init_resource::<AimTrial>()
+        .init_resource::<AimReplay>()
         .init_resource::<LabUi>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -69,12 +71,13 @@ fn handle_lab_ui_keys(
     keys: Res<ButtonInput<KeyCode>>,
     mut ui: ResMut<LabUi>,
     mut aim: ResMut<AimTrial>,
+    mut replay: ResMut<AimReplay>,
     mut look: ResMut<LookCapture>,
     mut timing: ResMut<ProcessorTimingState>,
 ) {
     let now = sense_input_win::monotonic_now_ns();
     let was_paused = ui.screen == crate::lab_ui::LabScreen::Paused;
-    handle_lab_keys(&keys, &mut ui, &mut aim, now);
+    handle_lab_keys(&keys, &mut ui, &mut aim, &mut replay, now);
     if was_paused && ui.screen == crate::lab_ui::LabScreen::Playing {
         timing.reset();
     }
