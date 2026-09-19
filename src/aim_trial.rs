@@ -201,6 +201,8 @@ pub struct AimTrial {
     pub last_timestamp_ns: u64,
     pub current_center: Vec3,
     pub start_timestamp_ns: u64,
+    pub accumulated_pause_ns: u64,
+    pub paused_at_qpc: Option<u64>,
     pub start_unix_ms: i64,
     pub score_secs: Option<f64>,
     pub shot_log: Vec<AimShotRecord>,
@@ -233,6 +235,8 @@ impl Default for AimTrial {
             last_timestamp_ns: 0,
             current_center: front_cone_center(0.0, 0.0),
             start_timestamp_ns: 0,
+            accumulated_pause_ns: 0,
+            paused_at_qpc: None,
             start_unix_ms: 0,
             score_secs: None,
             shot_log: Vec::new(),
@@ -362,6 +366,27 @@ pub fn random_front_cone_pose(rng: &mut u64) -> (Vec3, f64, f64) {
     (front_cone_center(yaw, pitch), yaw, pitch)
 }
 
+/// Wall span minus completed pauses; if currently paused, freezes at paused_at.
+pub fn active_elapsed_ns(trial: &AimTrial, now_ns: u64) -> u64 {
+    let end = trial.paused_at_qpc.unwrap_or(now_ns);
+    end.saturating_sub(trial.start_timestamp_ns)
+        .saturating_sub(trial.accumulated_pause_ns)
+}
+
+pub fn begin_aim_pause(trial: &mut AimTrial, now_ns: u64) {
+    if trial.phase != AimPhase::Armed || trial.paused_at_qpc.is_some() {
+        return;
+    }
+    trial.paused_at_qpc = Some(now_ns);
+}
+
+pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
+    if let Some(at) = trial.paused_at_qpc.take() {
+        trial.accumulated_pause_ns =
+            trial.accumulated_pause_ns.saturating_add(now_ns.saturating_sub(at));
+    }
+}
+
 pub fn start_aim_trial(
     pose: &mut YawPitch,
     trial: &mut AimTrial,
@@ -391,6 +416,8 @@ pub fn start_aim_trial(
     trial.next_target_ordinal = 1;
     trial.current_target_id.clear();
     trial.start_timestamp_ns = now_ns;
+    trial.accumulated_pause_ns = 0;
+    trial.paused_at_qpc = None;
     trial.start_unix_ms = start_unix_ms;
     trial.config_snapshot = Some(config);
     spawn_next_target(trial, now_ns);
@@ -409,6 +436,8 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.next_target_ordinal = 1;
         trial.live_targets.clear();
         trial.config_snapshot = None;
+        trial.accumulated_pause_ns = 0;
+        trial.paused_at_qpc = None;
     }
     trial.phase = AimPhase::Idle;
 }
@@ -603,7 +632,7 @@ pub fn apply_aim_shot(
     push_despawn_event(trial, timestamp_ns);
     trial.hits = trial.hits.saturating_add(1);
     if trial.hits >= AIM_HITS_TO_FINISH {
-        let elapsed = timestamp_ns.saturating_sub(trial.start_timestamp_ns) as f64 / 1e9;
+        let elapsed = active_elapsed_ns(trial, timestamp_ns) as f64 / 1e9;
         trial.score_secs = Some(elapsed);
         trial.phase = AimPhase::Idle;
         return true;
@@ -1345,6 +1374,21 @@ mod tests {
         let c1 = &trial.camera_log[1];
         assert!((c1.yaw_delta_deg - 0.5).abs() < 1e-12);
         assert!((c1.pitch_delta_deg - (-0.25)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn active_elapsed_excludes_pause_interval() {
+        let mut trial = AimTrial::default();
+        trial.phase = AimPhase::Armed;
+        trial.start_timestamp_ns = 1_000;
+        // play 10s
+        assert_eq!(active_elapsed_ns(&trial, 1_000 + 10_000_000_000), 10_000_000_000);
+        begin_aim_pause(&mut trial, 1_000 + 10_000_000_000);
+        // wall +30s while paused → still 10s active
+        assert_eq!(active_elapsed_ns(&trial, 1_000 + 40_000_000_000), 10_000_000_000);
+        end_aim_pause(&mut trial, 1_000 + 40_000_000_000);
+        // +5s more play → 15s active
+        assert_eq!(active_elapsed_ns(&trial, 1_000 + 45_000_000_000), 15_000_000_000);
     }
 
     #[test]

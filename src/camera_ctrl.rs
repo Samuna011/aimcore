@@ -140,7 +140,7 @@ pub fn drain_mouse_to_camera(
         if aim.phase == AimPhase::Armed {
             // GRIDSHOT: first timestamp with elapsed ≥ 60 ends before any gameplay on that sample.
             if aim.task_kind == AimTaskKind::Gridshot
-                && gridshot_should_end(aim.start_timestamp_ns, sample.timestamp_ns)
+                && gridshot_should_end(&aim, sample.timestamp_ns)
             {
                 if finish_gridshot_trial(&mut aim, sample.timestamp_ns) {
                     let status = match unix_time_ms() {

@@ -3,8 +3,8 @@
 use bevy::prelude::Vec3;
 
 use crate::aim_trial::{
-    AimPhase, AimRunConfigSnapshot, AimTaskKind, AimTrial, LiveAimTarget, AIM_CAMERA_ORIGIN,
-    AIM_TARGET_RADIUS,
+    active_elapsed_ns, AimPhase, AimRunConfigSnapshot, AimTaskKind, AimTrial, LiveAimTarget,
+    AIM_CAMERA_ORIGIN, AIM_TARGET_RADIUS,
 };
 use crate::camera_ctrl::YawPitch;
 use crate::config::ValidationState;
@@ -100,8 +100,8 @@ pub enum GridshotShotResult {
     Hit,
 }
 
-pub fn gridshot_should_end(start_ns: u64, now_ns: u64) -> bool {
-    (now_ns.saturating_sub(start_ns)) as f64 / 1e9 >= GRIDSHOT_DURATION_SECS
+pub fn gridshot_should_end(trial: &AimTrial, now_ns: u64) -> bool {
+    active_elapsed_ns(trial, now_ns) as f64 / 1e9 >= GRIDSHOT_DURATION_SECS
 }
 
 fn push_gridshot_spawn(trial: &mut AimTrial, live: &LiveAimTarget, timestamp_ns: u64) {
@@ -248,6 +248,8 @@ pub fn start_gridshot_trial(
     trial.next_target_ordinal = 1;
     trial.current_target_id.clear();
     trial.start_timestamp_ns = now_ns;
+    trial.accumulated_pause_ns = 0;
+    trial.paused_at_qpc = None;
     trial.start_unix_ms = start_unix_ms;
     trial.config_snapshot = Some(config);
 
@@ -367,7 +369,7 @@ pub fn finish_gridshot_trial(trial: &mut AimTrial, end_ns: u64) -> bool {
     if trial.phase != AimPhase::Armed || trial.task_kind != AimTaskKind::Gridshot {
         return false;
     }
-    let elapsed = end_ns.saturating_sub(trial.start_timestamp_ns) as f64 / 1e9;
+    let elapsed = active_elapsed_ns(trial, end_ns) as f64 / 1e9;
     trial.score_secs = Some(elapsed);
     trial.phase = AimPhase::Idle;
     true
@@ -684,10 +686,29 @@ mod tests {
 
     #[test]
     fn timer_ends_at_exactly_60e9_ns() {
-        assert!(!gridshot_should_end(0, 59_999_999_999));
-        assert!(gridshot_should_end(0, 60_000_000_000));
-        assert!(gridshot_should_end(1_000, 1_000 + 60_000_000_000));
-        assert!(!gridshot_should_end(1_000, 1_000 + 59_999_999_999));
+        let mut trial = AimTrial::default();
+        trial.phase = AimPhase::Armed;
+        trial.start_timestamp_ns = 0;
+        assert!(!gridshot_should_end(&trial, 59_999_999_999));
+        assert!(gridshot_should_end(&trial, 60_000_000_000));
+        trial.start_timestamp_ns = 1_000;
+        assert!(gridshot_should_end(&trial, 1_000 + 60_000_000_000));
+        assert!(!gridshot_should_end(&trial, 1_000 + 59_999_999_999));
+    }
+
+    #[test]
+    fn gridshot_end_ignores_paused_wall_time() {
+        use crate::aim_trial::{begin_aim_pause, end_aim_pause};
+
+        let mut trial = AimTrial::default();
+        trial.phase = AimPhase::Armed;
+        trial.task_kind = AimTaskKind::Gridshot;
+        trial.start_timestamp_ns = 0;
+        begin_aim_pause(&mut trial, 50_000_000_000); // 50s play then pause
+        assert!(!gridshot_should_end(&trial, 200_000_000_000)); // huge wall, still paused at 50s
+        end_aim_pause(&mut trial, 200_000_000_000);
+        assert!(!gridshot_should_end(&trial, 200_000_000_000 + 9_000_000_000)); // 59s active
+        assert!(gridshot_should_end(&trial, 200_000_000_000 + 10_000_000_000)); // 60s active
     }
 
     #[test]
@@ -730,7 +751,7 @@ mod tests {
             test_config(),
         ));
         let end = start + 60_000_000_000;
-        assert!(gridshot_should_end(trial.start_timestamp_ns, end));
+        assert!(gridshot_should_end(&trial, end));
         // Spec order: end first — do not apply shot on crossing sample.
         assert!(finish_gridshot_trial(&mut trial, end));
         let victim = trial.live_targets.first().cloned();
