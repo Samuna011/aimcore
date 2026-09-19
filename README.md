@@ -22,7 +22,9 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M3.y status:** COMPLETE / STOPPED. Full reconstructable aim telemetry on completed STATIC_CLICK runs: five SQLite tables (`aim_trials`, `aim_target_events`, `aim_shots`, `aim_input_samples`, `aim_camera_samples`); deterministic `random_seed` at Start; raw `dt_ns` vs processor `dt_used_ns` on input samples. See [telemetry data model spec](docs/superpowers/specs/2026-09-19-m3y-aim-telemetry-data-model-design.md).
 
-**M4.a status:** COMPLETE / STOPPED. GRIDSHOT v1 (60s, 3 concurrent exclusive 3×3 cells, vacant-cell respawn) on the M3.y five-layer model; HUD Start Gridshot + time/hits/accuracy/live; multi-sphere render sync. `experiment_version` **`0.9.0`**. See [GRIDSHOT design spec](docs/superpowers/specs/2026-09-19-m4a-gridshot-design.md). **Stop** — do not add tracking / 1wall6 until a new task spec.
+**M4.a status:** COMPLETE / STOPPED. GRIDSHOT v1 (60s, 3 concurrent exclusive 3×3 cells, vacant-cell respawn) on the M3.y five-layer model; HUD Start Gridshot + time/hits/accuracy/live; multi-sphere render sync. See [GRIDSHOT design spec](docs/superpowers/specs/2026-09-19-m4a-gridshot-design.md).
+
+**Lab UI shell status:** COMPLETE / STOPPED. Lobby / Playing / Paused screen machine; Esc enters pause (never aborts Armed trials); active trial duration excludes pause time; Settings and Lab tools from Lobby or Pause Home; V detail overlay. `experiment_version` **`0.10.0`**. See [Lab UI shell design spec](docs/superpowers/specs/2026-09-19-lab-ui-shell-design.md). **Stop** — do not add tracking / 1wall6 until a new task spec.
 
 ## Requirements
 
@@ -53,9 +55,9 @@ Opens the Validation Lab window (1280×720 default).
 **Cursor / UI control**
 
 - Starts in **UI mode** (cursor free) so you can click Start / Reset / End.
-- Press **Esc** to enter **look mode** (cursor locked) for yaw/pitch look and horizontal 360° validation.
-- Press **Esc** again to unlock the cursor and use the Validation Lab buttons.
-- While unlocked, mouse movement is not applied to the camera and is not counted toward validation.
+- In **Validation Lab** (Lab tools): press **Esc** to enter **look mode** (cursor locked) for yaw/pitch look and horizontal 360° validation; press **Esc** again to unlock.
+- In **aim tasks** (Playing): **Esc** pauses the trial (clock frozen, no shots); **Esc** again resumes. Esc never cancels an Armed trial — use Restart / Change trial / Exit from Pause Home.
+- While the cursor is unlocked, mouse movement is not applied to the camera and is not counted toward validation or aim gameplay.
 
 ### Validation Lab workflow
 
@@ -92,4 +94,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + **M4.a GRIDSHOT v1** complete — **STOPPED** at exp `0.9.0`. Next: new task spec (tracking / 1wall6) or M4 compare conditions.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + M4.a GRIDSHOT v1 + **Lab UI shell** complete — **STOPPED** at exp `0.10.0`. Next: new task spec (tracking / 1wall6) or M4 compare conditions.

@@ -28,7 +28,7 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.9.0";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.10.0";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
 pub const STATIC_CLICK_TASK_VERSION: &str = "1";
 pub const PITCH_MODEL_ID: &str = "unverified_0.1";
@@ -472,9 +472,9 @@ pub fn build_completed_aim_trial_record(
     } else {
         hits as f64 / shots as f64
     };
-    let duration_secs =
-        (end_timestamp_ns.saturating_sub(trial.start_timestamp_ns)) as f64 / 1e9;
-    let score_secs = trial.score_secs.unwrap_or(duration_secs);
+    let active_secs = active_elapsed_ns(trial, end_timestamp_ns) as f64 / 1e9;
+    let score_secs = trial.score_secs.unwrap_or(active_secs);
+    let duration_secs = score_secs;
 
     let (trial_type, task_version, task_config_json) = match trial.task_kind {
         AimTaskKind::StaticClick => (
@@ -940,7 +940,7 @@ mod tests {
         let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.9.0");
+        assert_eq!(record.experiment_version, "0.10.0");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());
@@ -1331,6 +1331,27 @@ mod tests {
         end_aim_pause(&mut trial, 1_000 + 40_000_000_000);
         // +5s more play → 15s active
         assert_eq!(active_elapsed_ns(&trial, 1_000 + 45_000_000_000), 15_000_000_000);
+    }
+
+    #[test]
+    fn completed_record_duration_excludes_pause() {
+        let mut trial = AimTrial::default();
+        trial.phase = AimPhase::Idle;
+        trial.start_timestamp_ns = 0;
+        trial.score_secs = Some(15.0);
+        trial.accumulated_pause_ns = 30_000_000_000;
+        trial.config_snapshot = Some(AimRunConfigSnapshot::from_live(
+            &ExperimentSettings::default(),
+            "none",
+            "0.0.0",
+            "{}",
+            1920,
+            1080,
+        ));
+        let end_ns = 45_000_000_000;
+        let record = build_completed_aim_trial_record(&trial, 1_700_000_000_000, end_ns);
+        assert!((record.duration_secs - 15.0).abs() < 1e-9);
+        assert!((record.score_secs - 15.0).abs() < 1e-9);
     }
 
     #[test]

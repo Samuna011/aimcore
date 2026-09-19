@@ -1,10 +1,11 @@
-# Telemetry Schema (M1 + M2 + M3.x + M3.y + M4.a)
+# Telemetry Schema (M1 + M2 + M3.x + M3.y + M4.a + Lab UI shell)
 
 **Date:** 2026-09-19  
-**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.9.0`  
+**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.10.0`  
 **M3.x:** adds `aim_trials` / `aim_shots` for completed aim runs (`experiment_id` = `aim_lab`)  
 **M3.y:** adds `aim_target_events`, `aim_input_samples`, `aim_camera_samples`; expands `aim_trials` snapshot  
-**M4.a:** `trial_type = GRIDSHOT` on the same five tables; aim + validation runs use `experiment_version` **`0.9.0`**  
+**M4.a:** `trial_type = GRIDSHOT` on the same five tables  
+**Lab UI shell:** aim + validation runs use `experiment_version` **`0.10.0`**; `duration_secs` / `score_secs` = pause-excluded active time (not wall-clock span)  
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -63,7 +64,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.9.0` for all new sessions, regardless of processor |
+| `experiment_version` | TEXT | `0.10.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -211,7 +212,7 @@ One row per **completed** aim trial. Immutable experiment/run snapshot: everythi
 | `id` | TEXT PK | `aim_{utc_date}_{seq:06}` |
 | `app_version` | TEXT | binary version |
 | `experiment_id` | TEXT | `aim_lab` (distinct from `validation_lab`) |
-| `experiment_version` | TEXT | **`0.9.0`** |
+| `experiment_version` | TEXT | **`0.10.0`** |
 | `trial_type` | TEXT | `STATIC_CLICK` or `GRIDSHOT` (task discriminator) |
 | `status` | TEXT | always `completed` for inserted rows |
 | `processor_id` | TEXT | snapshot at finish |
@@ -235,11 +236,11 @@ One row per **completed** aim trial. Immutable experiment/run snapshot: everythi
 | `metrics_json` | TEXT | light extras (`{}` for STATIC_CLICK v1) |
 | `start_unix_ms` / `end_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `start_timestamp_ns` / `end_timestamp_ns` | INTEGER | monotonic ns (score clock) |
-| `duration_secs` | REAL | seconds |
+| `duration_secs` | REAL | pause-excluded active seconds (matches `score_secs` at finish) |
 | `hits` | INTEGER | successful hits |
 | `shots` | INTEGER | all clicks (hits + misses) |
 | `misses` | INTEGER | `shots - hits` |
-| `score_secs` | REAL | time to required hits (HUD score) |
+| `score_secs` | REAL | pause-excluded active time to finish (HUD score) |
 | `accuracy` | REAL | `hits / shots` |
 
 #### Seed semantics
@@ -366,7 +367,7 @@ Design: [2026-09-19-m3y-aim-telemetry-data-model-design.md](./superpowers/specs/
 
 ## M3.x Aim Tables (superseded by M3.y)
 
-M3.x introduced `aim_trials` + `aim_shots` only. M3.y extends the snapshot columns and adds three child streams. Existing `0.7.0` / `0.8.0` rows remain readable after migration; new completed trials write at **`0.9.0`** (STATIC_CLICK or GRIDSHOT) with full child streams.
+M3.x introduced `aim_trials` + `aim_shots` only. M3.y extends the snapshot columns and adds three child streams. Existing `0.7.0` / `0.8.0` / `0.9.0` rows remain readable after migration; new completed trials write at **`0.10.0`** (STATIC_CLICK or GRIDSHOT) with full child streams and pause-excluded duration fields.
 
 ---
 
@@ -398,11 +399,11 @@ One row per **completed** aim trial. `trial_type` discriminates task kind (`STAT
 | `metrics_json` | TEXT | type-specific extras (`{}` for STATIC_CLICK v1) |
 | `start_unix_ms` / `end_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `start_timestamp_ns` / `end_timestamp_ns` | INTEGER | monotonic ns (score clock) |
-| `duration_secs` | REAL | seconds |
+| `duration_secs` | REAL | pause-excluded active seconds (matches `score_secs` at finish) |
 | `hits` | INTEGER | successful hits |
 | `shots` | INTEGER | all clicks (hits + misses) |
 | `misses` | INTEGER | `shots - hits` |
-| `score_secs` | REAL | time to required hits (HUD score) |
+| `score_secs` | REAL | pause-excluded active time to finish (HUD score) |
 | `accuracy` | REAL | `hits / shots` |
 
 ### `aim_shots` (M3.x)
