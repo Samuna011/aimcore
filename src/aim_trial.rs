@@ -331,11 +331,12 @@ fn next_range(rng: &mut u64, lo: f64, hi: f64) -> f64 {
     lo + next_unit(rng) * (hi - lo)
 }
 
-pub fn random_front_cone_center(rng: &mut u64) -> Vec3 {
+/// Draw a random front-cone pose: `(center, yaw_off_deg, pitch_off_deg)`.
+pub fn random_front_cone_pose(rng: &mut u64) -> (Vec3, f64, f64) {
     let yaw = next_range(rng, -AIM_YAW_HALF_DEG, AIM_YAW_HALF_DEG);
     // Asymmetric pitch: less downward so targets stay visible above the floor.
     let pitch = next_range(rng, -AIM_PITCH_DOWN_DEG, AIM_PITCH_UP_DEG);
-    front_cone_center(yaw, pitch)
+    (front_cone_center(yaw, pitch), yaw, pitch)
 }
 
 pub fn start_aim_trial(
@@ -510,9 +511,8 @@ fn push_despawn_event(trial: &mut AimTrial, timestamp_ns: u64) {
 }
 
 fn spawn_next_target(trial: &mut AimTrial, timestamp_ns: u64) {
-    let yaw = next_range(&mut trial.rng_state, -AIM_YAW_HALF_DEG, AIM_YAW_HALF_DEG);
-    let pitch = next_range(&mut trial.rng_state, -AIM_PITCH_DOWN_DEG, AIM_PITCH_UP_DEG);
-    trial.current_center = front_cone_center(yaw, pitch);
+    let (center, yaw, pitch) = random_front_cone_pose(&mut trial.rng_state);
+    trial.current_center = center;
     trial.current_target_id = format_target_id(trial.next_target_ordinal);
     trial.next_target_ordinal = trial.next_target_ordinal.saturating_add(1);
     push_spawn_event(trial, timestamp_ns, yaw, pitch);
@@ -722,7 +722,7 @@ mod tests {
     fn front_cone_centers_stay_forward_and_above_floor() {
         let mut rng = 42u64;
         for _ in 0..80 {
-            let c = random_front_cone_center(&mut rng);
+            let (c, _, _) = random_front_cone_pose(&mut rng);
             assert!(c.z < AIM_CAMERA_ORIGIN.z - 1.0);
             assert!(
                 c.y >= AIM_FLOOR_CLEARANCE - 1e-4,
