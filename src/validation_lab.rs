@@ -5,7 +5,8 @@ use sense_accel::CapMode;
 
 use crate::{
     aim_trial::{
-        cancel_aim_trial, start_aim_trial, AimPhase, AimTrial, AIM_HITS_TO_FINISH,
+        cancel_aim_trial, start_aim_trial, AimPhase, AimRunConfigSnapshot, AimTrial,
+        AIM_HITS_TO_FINISH,
     },
     camera_ctrl::{
         reset_camera, ActiveInputProcessor, LiveInputStats, ProcessorTimingState, YawPitch,
@@ -38,9 +39,9 @@ pub fn draw_hud(
     ),
 ) -> bevy::prelude::Result {
     let (mut active_processor, mut timing) = processor_runtime;
-    // Idle: keep live processor in sync with HUD settings so feel tests / SPEED DEBUG
-    // work without requiring Start Validation.
-    if !validation.is_running() {
+    // Idle (and not Armed): keep live processor in sync with HUD settings so feel
+    // tests / SPEED DEBUG work without requiring Start Validation.
+    if !validation.is_running() && aim.phase != AimPhase::Armed {
         let id_mismatch = active_processor.processor.id() != settings.processor_id.as_str();
         if settings.is_changed() || id_mismatch {
             if let Ok(processor) =
@@ -168,6 +169,14 @@ pub fn draw_hud(
                     match unix_time_ms() {
                         Ok(start_ms) => {
                             let now = sense_input_win::monotonic_now_ns();
+                            let config = AimRunConfigSnapshot::from_live(
+                                &settings,
+                                active_processor.processor.id(),
+                                active_processor.processor.version(),
+                                &active_processor.processor.config_json(),
+                                window.physical_width(),
+                                window.physical_height(),
+                            );
                             if start_aim_trial(
                                 &mut pose,
                                 &mut aim,
@@ -175,6 +184,7 @@ pub fn draw_hud(
                                 now,
                                 start_ms,
                                 now,
+                                config,
                             )
                             {
                                 session.status_message = Some(format!(
@@ -279,6 +289,7 @@ pub fn draw_hud(
                     ui.monospace("LAST SHOT: —");
                 }
             }
+            let settings_locked = validation.is_running() || aim.phase == AimPhase::Armed;
             ui.monospace(format!(
                 "STATE: {}",
                 if validation.is_running() {
@@ -310,7 +321,7 @@ pub fn draw_hud(
             ui.small(
                 "Gain on uses Linear Gain; Gain off uses Legacy/Sensitivity. Caps match official classic 1:1.",
             );
-            ui.add_enabled_ui(!validation.is_running(), |ui| {
+            ui.add_enabled_ui(!settings_locked, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Processor (Idle only)");
                     egui::ComboBox::from_id_salt("processor_id")
@@ -417,6 +428,8 @@ pub fn draw_hud(
             });
             if validation.is_running() {
                 ui.small("Processor locked while validation is running (snapshotted at Start).");
+            } else if aim.phase == AimPhase::Armed {
+                ui.small("Processor locked while aim trial is Armed (snapshotted at Start Aim).");
             }
             if live_input.has_accel_debug {
                 ui.separator();
@@ -447,7 +460,7 @@ pub fn draw_hud(
             }
             ui.separator();
             ui.label("Declared mouse DPI (must match Logitech setting). Does not change yaw math.");
-            ui.add_enabled_ui(!validation.is_running(), |ui| {
+            ui.add_enabled_ui(!settings_locked, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("DPI");
                     ui.add(
@@ -469,6 +482,8 @@ pub fn draw_hud(
             });
             if validation.is_running() {
                 ui.small("DPI/sensitivity locked while validation is running (snapshotted at Start).");
+            } else if aim.phase == AimPhase::Armed {
+                ui.small("DPI/sensitivity locked while aim trial is Armed (snapshotted at Start Aim).");
             }
             let config = settings.sensitivity_config();
             let edpi = sense_math::edpi(config.dpi, config.sensitivity);

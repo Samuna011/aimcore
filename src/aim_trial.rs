@@ -116,6 +116,60 @@ pub fn aim_persist_status_from_insert(
     }
 }
 
+/// Immutable experiment/run config captured at Start Aim; persist must use only this.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AimRunConfigSnapshot {
+    pub processor_id: String,
+    pub processor_version: String,
+    pub processor_config_json: String,
+    pub dpi: f64,
+    pub sensitivity: f64,
+    pub polling_rate_hz: f64,
+    pub fov_degrees_h: f64,
+    pub pitch_model_id: String,
+    pub pitch_model_version: String,
+    pub pitch_config_json: String,
+    pub resolution_width: u32,
+    pub resolution_height: u32,
+    pub aspect_ratio: f64,
+    pub hardware_config_json: String,
+    pub view_config_json: String,
+}
+
+impl AimRunConfigSnapshot {
+    pub fn from_live(
+        settings: &ExperimentSettings,
+        processor_id: &str,
+        processor_version: &str,
+        processor_config_json: &str,
+        resolution_width: u32,
+        resolution_height: u32,
+    ) -> Self {
+        let aspect_ratio = if resolution_height == 0 {
+            0.0
+        } else {
+            resolution_width as f64 / resolution_height as f64
+        };
+        Self {
+            processor_id: processor_id.into(),
+            processor_version: processor_version.into(),
+            processor_config_json: processor_config_json.into(),
+            dpi: settings.dpi,
+            sensitivity: settings.sensitivity,
+            polling_rate_hz: settings.polling_rate_hz as f64,
+            fov_degrees_h: settings.fov_degrees_h,
+            pitch_model_id: PITCH_MODEL_ID.into(),
+            pitch_model_version: PITCH_MODEL_VERSION.into(),
+            pitch_config_json: pitch_config_json(),
+            resolution_width,
+            resolution_height,
+            aspect_ratio,
+            hardware_config_json: hardware_config_json(),
+            view_config_json: view_config_json(settings.fov_degrees_h),
+        }
+    }
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct AimTrial {
     pub phase: AimPhase,
@@ -136,6 +190,8 @@ pub struct AimTrial {
     pub current_target_id: String,
     pub next_target_ordinal: u32,
     pub last_persist: Option<AimPersistStatus>,
+    /// Captured at Start; required for completed persist. Cleared on cancel.
+    pub config_snapshot: Option<AimRunConfigSnapshot>,
     input_seq: u64,
     last_raw_timestamp_ns: Option<u64>,
     last_yaw_for_cam: f64,
@@ -164,6 +220,7 @@ impl Default for AimTrial {
             current_target_id: String::new(),
             next_target_ordinal: 1,
             last_persist: None,
+            config_snapshot: None,
             input_seq: 0,
             last_raw_timestamp_ns: None,
             last_yaw_for_cam: 0.0,
@@ -288,6 +345,7 @@ pub fn start_aim_trial(
     now_ns: u64,
     start_unix_ms: i64,
     random_seed: u64,
+    config: AimRunConfigSnapshot,
 ) -> bool {
     if validation.is_running() || trial.phase == AimPhase::Armed {
         return false;
@@ -308,6 +366,7 @@ pub fn start_aim_trial(
     trial.current_target_id.clear();
     trial.start_timestamp_ns = now_ns;
     trial.start_unix_ms = start_unix_ms;
+    trial.config_snapshot = Some(config);
     spawn_next_target(trial, now_ns);
     true
 }
@@ -322,8 +381,21 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.last_hit = None;
         trial.current_target_id.clear();
         trial.next_target_ordinal = 1;
+        trial.config_snapshot = None;
     }
     trial.phase = AimPhase::Idle;
+}
+
+/// When look capture is disabled (ESC UI mode), abort an Armed run so discarded
+/// mouse samples cannot leave silent gaps in a completed trial.
+/// Returns true if a trial was cancelled.
+pub fn on_look_disabled(aim: &mut AimTrial) -> bool {
+    if aim.phase == AimPhase::Armed {
+        cancel_aim_trial(aim);
+        true
+    } else {
+        false
+    }
 }
 
 pub fn static_click_task_config_json() -> String {
@@ -340,16 +412,14 @@ pub fn static_click_task_config_json() -> String {
 }
 
 pub fn build_completed_aim_trial_record(
-    settings: &ExperimentSettings,
-    processor_id: &str,
-    processor_version: &str,
-    processor_config_json: &str,
     trial: &AimTrial,
     end_unix_ms: i64,
     end_timestamp_ns: u64,
-    resolution_width: u32,
-    resolution_height: u32,
 ) -> AimTrialRecord {
+    let snap = trial
+        .config_snapshot
+        .as_ref()
+        .expect("completed aim trial must have Start config snapshot");
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
     let misses = shots.saturating_sub(hits);
@@ -361,11 +431,6 @@ pub fn build_completed_aim_trial_record(
     let duration_secs =
         (end_timestamp_ns.saturating_sub(trial.start_timestamp_ns)) as f64 / 1e9;
     let score_secs = trial.score_secs.unwrap_or(duration_secs);
-    let aspect_ratio = if resolution_height == 0 {
-        0.0
-    } else {
-        resolution_width as f64 / resolution_height as f64
-    };
 
     AimTrialRecord {
         id: String::new(),
@@ -374,23 +439,23 @@ pub fn build_completed_aim_trial_record(
         experiment_version: AIM_EXPERIMENT_VERSION.into(),
         trial_type: AIM_TRIAL_TYPE.into(),
         status: "completed".into(),
-        processor_id: processor_id.into(),
-        processor_version: processor_version.into(),
-        processor_config_json: processor_config_json.into(),
-        dpi: settings.dpi,
-        sensitivity: settings.sensitivity,
-        polling_rate_hz: settings.polling_rate_hz as f64,
-        fov_degrees_h: settings.fov_degrees_h,
-        pitch_model_id: PITCH_MODEL_ID.into(),
-        pitch_model_version: PITCH_MODEL_VERSION.into(),
-        pitch_config_json: pitch_config_json(),
-        resolution_width,
-        resolution_height,
-        aspect_ratio,
+        processor_id: snap.processor_id.clone(),
+        processor_version: snap.processor_version.clone(),
+        processor_config_json: snap.processor_config_json.clone(),
+        dpi: snap.dpi,
+        sensitivity: snap.sensitivity,
+        polling_rate_hz: snap.polling_rate_hz,
+        fov_degrees_h: snap.fov_degrees_h,
+        pitch_model_id: snap.pitch_model_id.clone(),
+        pitch_model_version: snap.pitch_model_version.clone(),
+        pitch_config_json: snap.pitch_config_json.clone(),
+        resolution_width: snap.resolution_width,
+        resolution_height: snap.resolution_height,
+        aspect_ratio: snap.aspect_ratio,
         random_seed: trial.random_seed,
         task_version: STATIC_CLICK_TASK_VERSION.into(),
-        hardware_config_json: hardware_config_json(),
-        view_config_json: view_config_json(settings.fov_degrees_h),
+        hardware_config_json: snap.hardware_config_json.clone(),
+        view_config_json: snap.view_config_json.clone(),
         task_config_json: static_click_task_config_json(),
         metrics_json: "{}".into(),
         start_unix_ms: trial.start_unix_ms,
@@ -636,6 +701,17 @@ pub fn sync_aim_target(
 mod tests {
     use super::*;
 
+    fn test_config() -> AimRunConfigSnapshot {
+        AimRunConfigSnapshot::from_live(
+            &ExperimentSettings::default(),
+            "none",
+            "0.1.0",
+            "{}",
+            1920,
+            1080,
+        )
+    }
+
     #[test]
     fn left_button_flag() {
         assert!(left_button_down(RI_MOUSE_LEFT_BUTTON_DOWN));
@@ -666,7 +742,7 @@ mod tests {
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
         assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42));
+        , 42, test_config()));
         let first = trial.current_center;
 
         // Aim away: miss
@@ -693,7 +769,7 @@ mod tests {
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
         assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42));
+        , 42, test_config()));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -716,7 +792,7 @@ mod tests {
         let mut pose = YawPitch::default();
         let start = 5_000_000_000u64;
         assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, start, 1_700_000_000_000
-        , 42));
+        , 42, test_config()));
         for i in 0..AIM_HITS_TO_FINISH {
             trial.current_center = front_cone_center(0.0, 0.0);
             pose.yaw_deg = 0.0;
@@ -743,7 +819,7 @@ mod tests {
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
         assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42));
+        , 42, test_config()));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -757,6 +833,7 @@ mod tests {
         assert!(trial.target_events.is_empty());
         assert!(trial.input_log.is_empty());
         assert!(trial.camera_log.is_empty());
+        assert!(trial.config_snapshot.is_none());
         assert_eq!(trial.hits, 0);
     }
 
@@ -778,7 +855,7 @@ mod tests {
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
         assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42));
+        , 42, test_config()));
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
 
@@ -793,8 +870,24 @@ mod tests {
         let mut pose = YawPitch::default();
         let start_ns = 5_000_000_000u64;
         let end_ns = start_ns + 600_000_000;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, start_ns, 1_700_000_000_000
-        , 42));
+        let settings = ExperimentSettings::default();
+        let config = AimRunConfigSnapshot::from_live(
+            &settings,
+            "rawaccel_linear",
+            "0.2.0",
+            r#"{"acceleration":0.01}"#,
+            1920,
+            1080,
+        );
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start_ns,
+            1_700_000_000_000,
+            42,
+            config,
+        ));
 
         for i in 0..AIM_HITS_TO_FINISH {
             trial.current_center = front_cone_center(0.0, 0.0);
@@ -803,18 +896,7 @@ mod tests {
             apply_aim_shot(&mut trial, &pose, start_ns + (i as u64 + 1) * 100_000_000);
         }
 
-        let settings = ExperimentSettings::default();
-        let record = build_completed_aim_trial_record(
-            &settings,
-            "rawaccel_linear",
-            "0.2.0",
-            r#"{"acceleration":0.01}"#,
-            &trial,
-            1_700_000_000_600,
-            end_ns,
-            1920,
-            1080,
-        );
+        let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
         assert_eq!(record.experiment_version, "0.8.0");
@@ -865,6 +947,129 @@ mod tests {
     }
 
     #[test]
+    fn start_captures_config_snapshot_fields() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let mut settings = ExperimentSettings::default();
+        settings.dpi = 1600.0;
+        settings.sensitivity = 0.2;
+        settings.polling_rate_hz = 500;
+        settings.fov_degrees_h = 90.0;
+        let config = AimRunConfigSnapshot::from_live(
+            &settings,
+            "rawaccel_linear",
+            "0.2.0",
+            r#"{"acceleration":0.01}"#,
+            1280,
+            720,
+        );
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            1_000_000_000,
+            1_700_000_000_000,
+            7,
+            config.clone(),
+        ));
+        let snap = trial.config_snapshot.as_ref().expect("snapshot");
+        assert_eq!(snap.processor_id, "rawaccel_linear");
+        assert_eq!(snap.processor_version, "0.2.0");
+        assert_eq!(snap.processor_config_json, r#"{"acceleration":0.01}"#);
+        assert_eq!(snap.dpi, 1600.0);
+        assert_eq!(snap.sensitivity, 0.2);
+        assert_eq!(snap.polling_rate_hz, 500.0);
+        assert_eq!(snap.fov_degrees_h, 90.0);
+        assert_eq!(snap.resolution_width, 1280);
+        assert_eq!(snap.resolution_height, 720);
+        assert!((snap.aspect_ratio - 1280.0 / 720.0).abs() < 1e-9);
+        assert_eq!(snap.pitch_model_id, PITCH_MODEL_ID);
+        assert_eq!(snap.pitch_model_version, PITCH_MODEL_VERSION);
+        assert!(!snap.pitch_config_json.is_empty());
+        assert!(!snap.hardware_config_json.is_empty());
+        assert!(snap.view_config_json.contains("\"horizontal_fov_deg\":90"));
+        assert_eq!(*snap, config);
+    }
+
+    #[test]
+    fn settings_mutation_after_start_does_not_change_built_record() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let mut settings = ExperimentSettings::default();
+        settings.dpi = 3200.0;
+        settings.sensitivity = 0.09;
+        settings.fov_degrees_h = 103.0;
+        let config = AimRunConfigSnapshot::from_live(
+            &settings,
+            "none",
+            "0.1.0",
+            "{}",
+            1920,
+            1080,
+        );
+        let start_ns = 5_000_000_000u64;
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start_ns,
+            1_700_000_000_000,
+            42,
+            config,
+        ));
+
+        // Mutate live settings after Start — must not affect persist snapshot.
+        settings.dpi = 800.0;
+        settings.sensitivity = 9.99;
+        settings.fov_degrees_h = 50.0;
+        settings.polling_rate_hz = 125;
+        settings.processor_id = "rawaccel_linear".into();
+
+        for i in 0..AIM_HITS_TO_FINISH {
+            trial.current_center = front_cone_center(0.0, 0.0);
+            pose.yaw_deg = 0.0;
+            pose.pitch_deg = 0.0;
+            apply_aim_shot(&mut trial, &pose, start_ns + (i as u64 + 1) * 100_000_000);
+        }
+
+        let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, start_ns + 600_000_000);
+        assert_eq!(record.dpi, 3200.0);
+        assert_eq!(record.sensitivity, 0.09);
+        assert_eq!(record.fov_degrees_h, 103.0);
+        assert_eq!(record.polling_rate_hz, ExperimentSettings::default().polling_rate_hz as f64);
+        assert_eq!(record.processor_id, "none");
+        assert_eq!(record.resolution_width, 1920);
+        assert_eq!(record.resolution_height, 1080);
+        assert!(record.view_config_json.contains("\"horizontal_fov_deg\":103"));
+    }
+
+    #[test]
+    fn on_look_disabled_cancels_armed_only() {
+        let mut idle = AimTrial::default();
+        assert!(!on_look_disabled(&mut idle));
+        assert_eq!(idle.phase, AimPhase::Idle);
+
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            1_000_000_000,
+            1_700_000_000_000,
+            42,
+            test_config(),
+        ));
+        trial.push_aim_input_sample(1_000_000_001, 1, 0, 1.0, 0.0, 0, None, None);
+        assert!(on_look_disabled(&mut trial));
+        assert_eq!(trial.phase, AimPhase::Idle);
+        assert!(trial.shot_log.is_empty());
+        assert!(trial.input_log.is_empty());
+        assert!(trial.config_snapshot.is_none());
+        assert!(!on_look_disabled(&mut trial));
+    }
+
+    #[test]
     fn same_seed_yields_same_spawn_centers() {
         let mut centers_a = Vec::new();
         let mut centers_b = Vec::new();
@@ -879,7 +1084,8 @@ mod tests {
                 now,
                 1_700_000_000_000,
                 42,
-            ));
+                test_config(),
+        ));
             assert_eq!(trial.random_seed, 42);
             centers.push(trial.current_center);
             for i in 0..2 {
@@ -907,6 +1113,7 @@ mod tests {
             1_000_000_000u64,
             1_700_000_000_000,
             43,
+            test_config(),
         ));
         assert_eq!(trial_other.random_seed, 43);
         assert_ne!(centers_a[0], trial_other.current_center);
@@ -924,6 +1131,7 @@ mod tests {
             now,
             1_700_000_000_000,
             7,
+            test_config(),
         ));
         assert_eq!(trial.target_events.len(), 1);
         assert_eq!(trial.target_events[0].event_type, "spawn");
@@ -970,6 +1178,7 @@ mod tests {
             now,
             1_700_000_000_000,
             99,
+            test_config(),
         ));
 
         pose.yaw_deg = 90.0;
@@ -1106,6 +1315,7 @@ mod tests {
             now,
             1_700_000_000_000,
             42,
+            test_config(),
         ));
 
         trial.push_aim_input_sample(now + 1, 1, 0, 1.0, 0.0, 0, None, None);
@@ -1144,6 +1354,7 @@ mod tests {
             now + 10,
             1_700_000_000_010,
             7,
+            test_config(),
         ));
         assert!(trial.input_log.is_empty());
         assert!(trial.camera_log.is_empty());

@@ -4,11 +4,12 @@ use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
     aim_trial::{
-        aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTrial,
+        aim_persist_status_from_insert, apply_aim_shot, left_button_down, on_look_disabled,
+        AimPhase, AimTrial,
     },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
-    session::{persist_completed_aim_trial, unix_time_ms},
+    session::{persist_completed_aim_trial, unix_time_ms, ValidationSession},
 };
 
 #[derive(Component, Debug, Clone, Copy, Default)]
@@ -72,14 +73,19 @@ pub fn drain_mouse_to_camera(
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
     mut aim: ResMut<AimTrial>,
-    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut session: ResMut<ValidationSession>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
     // While the cursor is free for egui (ESC UI mode), discard queued samples so
     // pointer movement toward buttons does not rotate the camera or pollute
-    // validation counters / telemetry.
+    // validation counters / telemetry. If an aim run is Armed, cancel it — otherwise
+    // discarded motion would silently gap a completed trial.
     if !look.enabled {
+        if on_look_disabled(&mut aim) {
+            session.status_message =
+                Some("Aim run cancelled — look unlocked (ESC) mid-trial.".into());
+        }
         return;
     }
     let accumulate_stats = validation.is_running();
@@ -139,13 +145,9 @@ pub fn drain_mouse_to_camera(
                 if apply_aim_shot(&mut aim, &camera, sample.timestamp_ns) {
                     let status = match unix_time_ms() {
                         Ok(end_unix_ms) => persist_completed_aim_trial(
-                            &settings,
-                            &active_processor,
                             &mut aim,
                             end_unix_ms,
                             sample.timestamp_ns,
-                            window.physical_width(),
-                            window.physical_height(),
                         ),
                         Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
                     };

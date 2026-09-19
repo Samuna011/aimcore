@@ -237,25 +237,11 @@ pub fn reset_counters(
 
 /// Persist a finished STATIC_CLICK trial (5th hit). Abort / in-progress must not call this.
 pub fn persist_completed_aim_trial(
-    settings: &ExperimentSettings,
-    active_processor: &ActiveInputProcessor,
     trial: &mut AimTrial,
     end_unix_ms: i64,
     end_timestamp_ns: u64,
-    resolution_width: u32,
-    resolution_height: u32,
 ) -> AimPersistStatus {
-    let record = build_completed_aim_trial_record(
-        settings,
-        active_processor.processor.id(),
-        active_processor.processor.version(),
-        &active_processor.processor.config_json(),
-        trial,
-        end_unix_ms,
-        end_timestamp_ns,
-        resolution_width,
-        resolution_height,
-    );
+    let record = build_completed_aim_trial_record(trial, end_unix_ms, end_timestamp_ns);
     let shots = trial.shot_log.clone();
     let target_events = trial.target_events.clone();
     let input_log = trial.input_log.clone();
