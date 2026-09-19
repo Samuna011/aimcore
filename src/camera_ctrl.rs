@@ -72,6 +72,7 @@ pub fn drain_mouse_to_camera(
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
     mut aim: ResMut<AimTrial>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
@@ -143,6 +144,8 @@ pub fn drain_mouse_to_camera(
                             &mut aim,
                             end_unix_ms,
                             sample.timestamp_ns,
+                            window.physical_width(),
+                            window.physical_height(),
                         ),
                         Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
                     };

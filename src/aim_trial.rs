@@ -28,9 +28,30 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.7.0";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.8.0";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
 pub const STATIC_CLICK_TASK_VERSION: &str = "1";
+pub const PITCH_MODEL_ID: &str = "unverified_0.1";
+pub const PITCH_MODEL_VERSION: &str = "1";
+
+pub fn pitch_config_json() -> String {
+    format!(
+        r#"{{"yaw_deg_per_count_at_sens_1":{},"pitch_deg_per_count_at_sens_1":{},"pitch_sign":"+dy_look_down","pitch_clamp_deg":{},"certainty":"UNCERTAIN"}}"#,
+        sense_math::VALORANT_YAW_DEG_PER_COUNT_AT_SENS_1,
+        sense_math::VALORANT_YAW_DEG_PER_COUNT_AT_SENS_1,
+        sense_math::PITCH_LIMIT_DEG,
+    )
+}
+
+pub fn hardware_config_json() -> String {
+    r#"{"mouse_model":"","mouse_connection":"","firmware":"","display_refresh_hz":null}"#.into()
+}
+
+pub fn view_config_json(horizontal_fov_deg: f64) -> String {
+    format!(
+        r#"{{"projection":"perspective","horizontal_fov_deg":{horizontal_fov_deg},"vertical_fov_deg":null,"camera_mode":"yaw_pitch","presentation_mode":"AutoNoVsync"}}"#
+    )
+}
 
 pub fn format_target_id(ordinal: u32) -> String {
     format!("target_{ordinal:03}")
@@ -326,6 +347,8 @@ pub fn build_completed_aim_trial_record(
     trial: &AimTrial,
     end_unix_ms: i64,
     end_timestamp_ns: u64,
+    resolution_width: u32,
+    resolution_height: u32,
 ) -> AimTrialRecord {
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
@@ -338,6 +361,11 @@ pub fn build_completed_aim_trial_record(
     let duration_secs =
         (end_timestamp_ns.saturating_sub(trial.start_timestamp_ns)) as f64 / 1e9;
     let score_secs = trial.score_secs.unwrap_or(duration_secs);
+    let aspect_ratio = if resolution_height == 0 {
+        0.0
+    } else {
+        resolution_width as f64 / resolution_height as f64
+    };
 
     AimTrialRecord {
         id: String::new(),
@@ -353,16 +381,16 @@ pub fn build_completed_aim_trial_record(
         sensitivity: settings.sensitivity,
         polling_rate_hz: settings.polling_rate_hz as f64,
         fov_degrees_h: settings.fov_degrees_h,
-        pitch_model_id: String::new(),
-        pitch_model_version: String::new(),
-        pitch_config_json: "{}".into(),
-        resolution_width: 0,
-        resolution_height: 0,
-        aspect_ratio: 0.0,
+        pitch_model_id: PITCH_MODEL_ID.into(),
+        pitch_model_version: PITCH_MODEL_VERSION.into(),
+        pitch_config_json: pitch_config_json(),
+        resolution_width,
+        resolution_height,
+        aspect_ratio,
         random_seed: trial.random_seed,
         task_version: STATIC_CLICK_TASK_VERSION.into(),
-        hardware_config_json: "{}".into(),
-        view_config_json: "{}".into(),
+        hardware_config_json: hardware_config_json(),
+        view_config_json: view_config_json(settings.fov_degrees_h),
         task_config_json: static_click_task_config_json(),
         metrics_json: "{}".into(),
         start_unix_ms: trial.start_unix_ms,
@@ -784,10 +812,12 @@ mod tests {
             &trial,
             1_700_000_000_600,
             end_ns,
+            1920,
+            1080,
         );
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.7.0");
+        assert_eq!(record.experiment_version, "0.8.0");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());
@@ -799,6 +829,32 @@ mod tests {
         assert!(record.task_config_json.contains("\"rng_version\":\"1\""));
         assert_eq!(record.random_seed, 42);
         assert_eq!(record.task_version, STATIC_CLICK_TASK_VERSION);
+        assert_eq!(record.pitch_model_id, "unverified_0.1");
+        assert_eq!(record.pitch_model_version, "1");
+        assert!(record
+            .pitch_config_json
+            .contains("\"yaw_deg_per_count_at_sens_1\":0.07"));
+        assert!(record
+            .pitch_config_json
+            .contains("\"pitch_sign\":\"+dy_look_down\""));
+        assert!(record.pitch_config_json.contains("\"certainty\":\"UNCERTAIN\""));
+        assert_eq!(record.resolution_width, 1920);
+        assert_eq!(record.resolution_height, 1080);
+        assert!((record.aspect_ratio - 1920.0 / 1080.0).abs() < 1e-9);
+        assert!(record.hardware_config_json.contains("\"mouse_model\":\"\""));
+        assert!(record
+            .hardware_config_json
+            .contains("\"display_refresh_hz\":null"));
+        assert!(record
+            .view_config_json
+            .contains("\"projection\":\"perspective\""));
+        assert!(record.view_config_json.contains(&format!(
+            "\"horizontal_fov_deg\":{}",
+            settings.fov_degrees_h
+        )));
+        assert!(record
+            .view_config_json
+            .contains("\"presentation_mode\":\"AutoNoVsync\""));
         assert_eq!(record.hits, 5);
         assert_eq!(record.shots, 5);
         assert_eq!(record.misses, 0);

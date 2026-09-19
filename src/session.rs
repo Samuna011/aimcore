@@ -23,7 +23,7 @@ use crate::{
 
 const APP_VERSION: &str = "0.1.0";
 const EXPERIMENT_ID: &str = "validation_lab";
-const EXPERIMENT_VERSION: &str = "0.7.0";
+const EXPERIMENT_VERSION: &str = "0.8.0";
 const DATABASE_PATH: &str = "data/sense_maxer.db";
 
 #[derive(Resource, Debug, Default)]
@@ -242,6 +242,8 @@ pub fn persist_completed_aim_trial(
     trial: &mut AimTrial,
     end_unix_ms: i64,
     end_timestamp_ns: u64,
+    resolution_width: u32,
+    resolution_height: u32,
 ) -> AimPersistStatus {
     let record = build_completed_aim_trial_record(
         settings,
@@ -251,12 +253,24 @@ pub fn persist_completed_aim_trial(
         trial,
         end_unix_ms,
         end_timestamp_ns,
+        resolution_width,
+        resolution_height,
     );
     let shots = trial.shot_log.clone();
+    let target_events = trial.target_events.clone();
+    let input_log = trial.input_log.clone();
+    let camera_log = trial.camera_log.clone();
     let result = (|| {
         let db = open_database()?;
         let utc_date = utc_date_from_unix_ms(end_unix_ms);
-        db.insert_completed_aim_trial(&utc_date, &record, &shots, &[], &[], &[])
+        db.insert_completed_aim_trial(
+            &utc_date,
+            &record,
+            &shots,
+            &target_events,
+            &input_log,
+            &camera_log,
+        )
     })();
     aim_persist_status_from_insert(trial, result)
 }
@@ -363,7 +377,7 @@ mod tests {
 
     #[test]
     fn experiment_version_captures_gain_and_cap_settings() {
-        assert_eq!(EXPERIMENT_VERSION, "0.7.0");
+        assert_eq!(EXPERIMENT_VERSION, "0.8.0");
     }
 
     #[test]
