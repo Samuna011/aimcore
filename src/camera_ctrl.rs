@@ -10,7 +10,7 @@ use crate::{
     },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
-    lab_ui::{LabScreen, LabUi},
+    lab_ui::{finish_trial_ui, LabScreen, LabUi},
     session::{persist_completed_aim_trial, unix_time_ms},
 };
 
@@ -73,8 +73,8 @@ pub fn drain_mouse_to_camera(
     mut live: ResMut<LiveInputStats>,
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
-    look: Res<LookCapture>,
-    ui: Res<LabUi>,
+    mut look: ResMut<LookCapture>,
+    mut ui: ResMut<LabUi>,
     mut aim: ResMut<AimTrial>,
 ) {
     let samples = queue.0.drain_all();
@@ -128,14 +128,15 @@ pub fn drain_mouse_to_camera(
             {
                 if finish_gridshot_trial(&mut aim, sample.timestamp_ns) {
                     let status = match unix_time_ms() {
-                        Ok(end_unix_ms) => persist_completed_aim_trial(
-                            &mut aim,
-                            end_unix_ms,
-                            sample.timestamp_ns,
-                        ),
+                        Ok(end_unix_ms) => {
+                            persist_completed_aim_trial(&mut aim, end_unix_ms, sample.timestamp_ns)
+                        }
                         Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
                     };
                     aim.last_persist = Some(status);
+                    finish_trial_ui(&mut ui, &aim);
+                    look.enabled = false;
+                    break;
                 }
                 continue;
             }
@@ -174,14 +175,15 @@ pub fn drain_mouse_to_camera(
                 };
                 if finished {
                     let status = match unix_time_ms() {
-                        Ok(end_unix_ms) => persist_completed_aim_trial(
-                            &mut aim,
-                            end_unix_ms,
-                            sample.timestamp_ns,
-                        ),
+                        Ok(end_unix_ms) => {
+                            persist_completed_aim_trial(&mut aim, end_unix_ms, sample.timestamp_ns)
+                        }
                         Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
                     };
                     aim.last_persist = Some(status);
+                    finish_trial_ui(&mut ui, &aim);
+                    look.enabled = false;
+                    break;
                 }
             }
         }
@@ -238,8 +240,7 @@ fn apply_sample(
 ) -> InputCameraSample {
     let yaw_delta_deg = sense_math::yaw_delta_deg(processed_dx, sensitivity);
     pose.yaw_deg += yaw_delta_deg;
-    pose.pitch_deg =
-        sense_math::apply_pitch_delta(pose.pitch_deg, processed_dy, sensitivity);
+    pose.pitch_deg = sense_math::apply_pitch_delta(pose.pitch_deg, processed_dy, sensitivity);
     live.last_dx = sample.dx;
     live.last_dy = sample.dy;
     if accumulate_stats {
