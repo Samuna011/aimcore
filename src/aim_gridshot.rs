@@ -53,59 +53,6 @@ pub fn gridshot_cell_center(row: i32, col: i32) -> Vec3 {
     )
 }
 
-/// Occupancy of the 3×3 grid: at most one live target per cell.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GridOccupancy {
-    /// Parallel lists of occupied cells and their target ids (same length ≤ 3).
-    cells: Vec<(i32, i32)>,
-    target_ids: Vec<String>,
-}
-
-impl GridOccupancy {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn len(&self) -> usize {
-        self.cells.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
-    }
-
-    pub fn occupied_cells(&self) -> &[(i32, i32)] {
-        &self.cells
-    }
-
-    pub fn is_occupied(&self, row: i32, col: i32) -> bool {
-        self.cells.iter().any(|&(r, c)| r == row && c == col)
-    }
-
-    pub fn target_at(&self, row: i32, col: i32) -> Option<&str> {
-        self.cells
-            .iter()
-            .position(|&(r, c)| r == row && c == col)
-            .map(|i| self.target_ids[i].as_str())
-    }
-
-    /// Place `target_id` in `(row, col)`. Panics if the cell is already occupied.
-    pub fn occupy(&mut self, row: i32, col: i32, target_id: impl Into<String>) {
-        assert!(
-            !self.is_occupied(row, col),
-            "cell ({row},{col}) already occupied"
-        );
-        self.cells.push((row, col));
-        self.target_ids.push(target_id.into());
-    }
-
-    pub fn vacate(&mut self, row: i32, col: i32) -> Option<String> {
-        let i = self.cells.iter().position(|&(r, c)| r == row && c == col)?;
-        self.cells.remove(i);
-        Some(self.target_ids.remove(i))
-    }
-}
-
 pub fn gridshot_task_config_json() -> String {
     format!(
         r#"{{"grid_rows":{},"grid_cols":{},"concurrent_targets":{},"duration_secs":{},"spacing":{},"depth":{},"radius":{},"rng":"lcg","rng_version":"1"}}"#,
@@ -527,21 +474,6 @@ mod tests {
             assert!((-1..=1).contains(&r));
             assert!((-1..=1).contains(&c));
         }
-    }
-
-    #[test]
-    fn grid_occupancy_exclusive_cells() {
-        let mut g = GridOccupancy::new();
-        assert!(g.is_empty());
-        g.occupy(0, 0, "target_001");
-        g.occupy(1, -1, "target_002");
-        assert_eq!(g.len(), 2);
-        assert_eq!(g.occupied_cells(), &[(0, 0), (1, -1)]);
-        assert!(g.is_occupied(0, 0));
-        assert_eq!(g.target_at(0, 0), Some("target_001"));
-        assert_eq!(g.vacate(0, 0), Some("target_001".into()));
-        assert!(!g.is_occupied(0, 0));
-        assert_eq!(g.len(), 1);
     }
 
     #[test]
