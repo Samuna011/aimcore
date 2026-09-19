@@ -256,7 +256,7 @@ pub fn persist_completed_aim_trial(
     let result = (|| {
         let db = open_database()?;
         let utc_date = utc_date_from_unix_ms(end_unix_ms);
-        db.insert_completed_aim_trial(&utc_date, &record, &shots)
+        db.insert_completed_aim_trial(&utc_date, &record, &shots, &[], &[], &[])
     })();
     aim_persist_status_from_insert(trial, result)
 }

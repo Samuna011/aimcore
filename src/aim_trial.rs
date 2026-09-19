@@ -244,6 +244,16 @@ pub fn build_completed_aim_trial_record(
         sensitivity: settings.sensitivity,
         polling_rate_hz: settings.polling_rate_hz as f64,
         fov_degrees_h: settings.fov_degrees_h,
+        pitch_model_id: String::new(),
+        pitch_model_version: String::new(),
+        pitch_config_json: "{}".into(),
+        resolution_width: 0,
+        resolution_height: 0,
+        aspect_ratio: 0.0,
+        random_seed: 0,
+        task_version: String::new(),
+        hardware_config_json: "{}".into(),
+        view_config_json: "{}".into(),
         task_config_json: static_click_task_config_json(),
         metrics_json: "{}".into(),
         start_unix_ms: trial.start_unix_ms,
@@ -290,6 +300,7 @@ pub fn apply_aim_shot(
         target_y: center[1],
         target_z: center[2],
         target_radius: AIM_TARGET_RADIUS as f64,
+        target_id: String::new(),
     });
     trial.last_hit = Some(hit);
     trial.last_yaw_deg = pose.yaw_deg;
@@ -681,6 +692,7 @@ mod tests {
                 target_y: 0.0,
                 target_z: 0.0,
                 target_radius: 0.25,
+                target_id: String::new(),
             };
             6
         ];

@@ -2,7 +2,8 @@ use std::path::Path;
 
 use rusqlite::{params, Connection};
 use sense_types::{
-    AimShotRecord, AimTrialRecord, ConfigurationRecord, FovAxis, SessionRecord, ValidationResult,
+    AimCameraSampleRecord, AimInputSampleRecord, AimShotRecord, AimTargetEventRecord,
+    AimTrialRecord, ConfigurationRecord, FovAxis, SessionRecord, ValidationResult,
 };
 
 use crate::SessionBuffers;
@@ -144,6 +145,16 @@ CREATE TABLE IF NOT EXISTS aim_trials (
   sensitivity REAL NOT NULL,
   polling_rate_hz REAL NOT NULL,
   fov_degrees_h REAL NOT NULL,
+  pitch_model_id TEXT NOT NULL DEFAULT '',
+  pitch_model_version TEXT NOT NULL DEFAULT '',
+  pitch_config_json TEXT NOT NULL DEFAULT '{}',
+  resolution_width INTEGER NOT NULL DEFAULT 0,
+  resolution_height INTEGER NOT NULL DEFAULT 0,
+  aspect_ratio REAL NOT NULL DEFAULT 0,
+  random_seed INTEGER NOT NULL DEFAULT 0,
+  task_version TEXT NOT NULL DEFAULT '',
+  hardware_config_json TEXT NOT NULL DEFAULT '{}',
+  view_config_json TEXT NOT NULL DEFAULT '{}',
   task_config_json TEXT NOT NULL,
   metrics_json TEXT NOT NULL,
   start_unix_ms INTEGER NOT NULL,
@@ -169,14 +180,96 @@ CREATE TABLE IF NOT EXISTS aim_shots (
   target_y REAL NOT NULL,
   target_z REAL NOT NULL,
   target_radius REAL NOT NULL,
+  target_id TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(trial_id, shot_index),
   FOREIGN KEY(trial_id) REFERENCES aim_trials(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_aim_shots_trial ON aim_shots(trial_id);
+
+CREATE TABLE IF NOT EXISTS aim_target_events (
+  trial_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  event_index INTEGER NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  position_x REAL NOT NULL,
+  position_y REAL NOT NULL,
+  position_z REAL NOT NULL,
+  yaw_deg REAL,
+  pitch_deg REAL,
+  velocity_x REAL NOT NULL,
+  velocity_y REAL NOT NULL,
+  velocity_z REAL NOT NULL,
+  event_data_json TEXT NOT NULL,
+  PRIMARY KEY(trial_id, event_index),
+  FOREIGN KEY(trial_id) REFERENCES aim_trials(id)
+);
+CREATE INDEX IF NOT EXISTS idx_aim_target_events_trial ON aim_target_events(trial_id);
+
+CREATE TABLE IF NOT EXISTS aim_input_samples (
+  trial_id TEXT NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  sequence_number INTEGER NOT NULL,
+  raw_dx INTEGER NOT NULL,
+  raw_dy INTEGER NOT NULL,
+  processed_dx REAL NOT NULL,
+  processed_dy REAL NOT NULL,
+  dt_ns INTEGER NOT NULL,
+  dt_used_ns INTEGER NOT NULL,
+  input_speed REAL,
+  acceleration_scale REAL,
+  PRIMARY KEY(trial_id, sequence_number),
+  FOREIGN KEY(trial_id) REFERENCES aim_trials(id)
+);
+CREATE INDEX IF NOT EXISTS idx_aim_input_samples_trial ON aim_input_samples(trial_id);
+
+CREATE TABLE IF NOT EXISTS aim_camera_samples (
+  trial_id TEXT NOT NULL,
+  timestamp_ns INTEGER NOT NULL,
+  yaw_deg REAL NOT NULL,
+  pitch_deg REAL NOT NULL,
+  yaw_delta_deg REAL NOT NULL,
+  pitch_delta_deg REAL NOT NULL,
+  PRIMARY KEY(trial_id, timestamp_ns),
+  FOREIGN KEY(trial_id) REFERENCES aim_trials(id)
+);
+CREATE INDEX IF NOT EXISTS idx_aim_camera_samples_trial ON aim_camera_samples(trial_id);
 "#,
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+
+        self.migrate_aim_trial_columns()?;
+        self.migrate_aim_shot_columns()?;
+        Ok(())
+    }
+
+    fn migrate_aim_trial_columns(&self) -> Result<(), String> {
+        let additions = [
+            ("pitch_model_id", "TEXT NOT NULL DEFAULT ''"),
+            ("pitch_model_version", "TEXT NOT NULL DEFAULT ''"),
+            ("pitch_config_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("resolution_width", "INTEGER NOT NULL DEFAULT 0"),
+            ("resolution_height", "INTEGER NOT NULL DEFAULT 0"),
+            ("aspect_ratio", "REAL NOT NULL DEFAULT 0"),
+            ("random_seed", "INTEGER NOT NULL DEFAULT 0"),
+            ("task_version", "TEXT NOT NULL DEFAULT ''"),
+            ("hardware_config_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("view_config_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ];
+        for (name, decl) in additions {
+            add_column_if_missing(&self.connection, "aim_trials", name, decl)?;
+        }
+        Ok(())
+    }
+
+    fn migrate_aim_shot_columns(&self) -> Result<(), String> {
+        add_column_if_missing(
+            &self.connection,
+            "aim_shots",
+            "target_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )
     }
 
     pub fn upsert_configuration(&self, cfg: &ConfigurationRecord) -> Result<(), String> {
@@ -309,6 +402,9 @@ INSERT INTO sessions (
         utc_date: &str,
         trial: &AimTrialRecord,
         shots: &[AimShotRecord],
+        target_events: &[AimTargetEventRecord],
+        input_samples: &[AimInputSampleRecord],
+        camera_samples: &[AimCameraSampleRecord],
     ) -> Result<String, String> {
         if trial.status != "completed" {
             return Err(format!(
@@ -331,10 +427,14 @@ INSERT INTO sessions (
 INSERT INTO aim_trials (
   id, app_version, experiment_id, experiment_version, trial_type, status,
   processor_id, processor_version, processor_config_json, dpi, sensitivity,
-  polling_rate_hz, fov_degrees_h, task_config_json, metrics_json,
+  polling_rate_hz, fov_degrees_h,
+  pitch_model_id, pitch_model_version, pitch_config_json,
+  resolution_width, resolution_height, aspect_ratio, random_seed, task_version,
+  hardware_config_json, view_config_json,
+  task_config_json, metrics_json,
   start_unix_ms, end_unix_ms, start_timestamp_ns, end_timestamp_ns,
   duration_secs, hits, shots, misses, score_secs, accuracy
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 "#,
                 params![
                     trial_id,
@@ -350,6 +450,16 @@ INSERT INTO aim_trials (
                     trial.sensitivity,
                     trial.polling_rate_hz,
                     trial.fov_degrees_h,
+                    trial.pitch_model_id,
+                    trial.pitch_model_version,
+                    trial.pitch_config_json,
+                    as_i64(u64::from(trial.resolution_width), "resolution width")?,
+                    as_i64(u64::from(trial.resolution_height), "resolution height")?,
+                    trial.aspect_ratio,
+                    as_i64(trial.random_seed, "random seed")?,
+                    trial.task_version,
+                    trial.hardware_config_json,
+                    trial.view_config_json,
                     trial.task_config_json,
                     trial.metrics_json,
                     trial.start_unix_ms,
@@ -370,10 +480,44 @@ INSERT INTO aim_trials (
             let mut statement = transaction
                 .prepare(
                     r#"
+INSERT INTO aim_target_events (
+  trial_id, target_id, event_index, timestamp_ns, event_type,
+  position_x, position_y, position_z, yaw_deg, pitch_deg,
+  velocity_x, velocity_y, velocity_z, event_data_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+                )
+                .map_err(|error| error.to_string())?;
+            for event in target_events {
+                statement
+                    .execute(params![
+                        trial_id,
+                        event.target_id,
+                        as_i64(u64::from(event.event_index), "event index")?,
+                        as_i64(event.timestamp_ns, "target event timestamp ns")?,
+                        event.event_type,
+                        event.position_x,
+                        event.position_y,
+                        event.position_z,
+                        event.yaw_deg,
+                        event.pitch_deg,
+                        event.velocity_x,
+                        event.velocity_y,
+                        event.velocity_z,
+                        event.event_data_json,
+                    ])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
 INSERT INTO aim_shots (
   trial_id, shot_index, timestamp_ns, hit, yaw_deg, pitch_deg,
-  target_x, target_y, target_z, target_radius
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  target_x, target_y, target_z, target_radius, target_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 "#,
                 )
                 .map_err(|error| error.to_string())?;
@@ -390,6 +534,61 @@ INSERT INTO aim_shots (
                         shot.target_y,
                         shot.target_z,
                         shot.target_radius,
+                        shot.target_id,
+                    ])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+INSERT INTO aim_input_samples (
+  trial_id, timestamp_ns, sequence_number, raw_dx, raw_dy,
+  processed_dx, processed_dy, dt_ns, dt_used_ns, input_speed, acceleration_scale
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#,
+                )
+                .map_err(|error| error.to_string())?;
+            for sample in input_samples {
+                statement
+                    .execute(params![
+                        trial_id,
+                        as_i64(sample.timestamp_ns, "input sample timestamp ns")?,
+                        as_i64(sample.sequence_number, "input sample sequence number")?,
+                        sample.raw_dx,
+                        sample.raw_dy,
+                        sample.processed_dx,
+                        sample.processed_dy,
+                        as_i64(sample.dt_ns, "input sample dt_ns")?,
+                        as_i64(sample.dt_used_ns, "input sample dt_used_ns")?,
+                        sample.input_speed,
+                        sample.acceleration_scale,
+                    ])
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+INSERT INTO aim_camera_samples (
+  trial_id, timestamp_ns, yaw_deg, pitch_deg, yaw_delta_deg, pitch_delta_deg
+) VALUES (?, ?, ?, ?, ?, ?)
+"#,
+                )
+                .map_err(|error| error.to_string())?;
+            for sample in camera_samples {
+                statement
+                    .execute(params![
+                        trial_id,
+                        as_i64(sample.timestamp_ns, "camera sample timestamp ns")?,
+                        sample.yaw_deg,
+                        sample.pitch_deg,
+                        sample.yaw_delta_deg,
+                        sample.pitch_delta_deg,
                     ])
                     .map_err(|error| error.to_string())?;
             }
@@ -398,6 +597,32 @@ INSERT INTO aim_shots (
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(trial_id)
     }
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| error.to_string())?;
+    let exists = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .any(|name| name == column);
+    if exists {
+        return Ok(());
+    }
+    connection
+        .execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
+            [],
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn next_aim_sequence(connection: &Connection, prefix: &str) -> Result<u32, String> {

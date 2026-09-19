@@ -124,6 +124,16 @@ pub struct AimTrialRecord {
     pub sensitivity: f64,
     pub polling_rate_hz: f64,
     pub fov_degrees_h: f64,
+    pub pitch_model_id: String,
+    pub pitch_model_version: String,
+    pub pitch_config_json: String,
+    pub resolution_width: u32,
+    pub resolution_height: u32,
+    pub aspect_ratio: f64,
+    pub random_seed: u64,
+    pub task_version: String,
+    pub hardware_config_json: String,
+    pub view_config_json: String,
     pub task_config_json: String,
     pub metrics_json: String,
     pub start_unix_ms: i64,
@@ -149,6 +159,47 @@ pub struct AimShotRecord {
     pub target_y: f64,
     pub target_z: f64,
     pub target_radius: f64,
+    pub target_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimTargetEventRecord {
+    pub target_id: String,
+    pub event_index: u32,
+    pub timestamp_ns: u64,
+    pub event_type: String, // spawn|despawn|direction_change|appear|disappear
+    pub position_x: f64,
+    pub position_y: f64,
+    pub position_z: f64,
+    pub yaw_deg: Option<f64>,
+    pub pitch_deg: Option<f64>,
+    pub velocity_x: f64,
+    pub velocity_y: f64,
+    pub velocity_z: f64,
+    pub event_data_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimInputSampleRecord {
+    pub timestamp_ns: u64,
+    pub sequence_number: u64,
+    pub raw_dx: i32,
+    pub raw_dy: i32,
+    pub processed_dx: f64,
+    pub processed_dy: f64,
+    pub dt_ns: u64,      // raw QPC interval; 0 for first sample
+    pub dt_used_ns: u64, // after clamp (or same as dt_ns for none / bypass)
+    pub input_speed: Option<f64>,
+    pub acceleration_scale: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AimCameraSampleRecord {
+    pub timestamp_ns: u64,
+    pub yaw_deg: f64,
+    pub pitch_deg: f64,
+    pub yaw_delta_deg: f64,
+    pub pitch_delta_deg: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

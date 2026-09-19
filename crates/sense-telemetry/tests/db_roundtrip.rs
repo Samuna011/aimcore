@@ -2,9 +2,10 @@ use std::path::Path;
 
 use sense_telemetry::{SessionBuffers, TelemetryDb};
 use sense_types::{
-    AccelerationConfig, AimShotRecord, AimTrialRecord, ConfigurationRecord, DisplayConfig,
-    FovAxis, FrameSample, InputCameraSample, InputIntegrityReport, MouseSample,
-    ProcessedMouseSample, SensitivityConfig, SessionRecord, ValidationResult,
+    AccelerationConfig, AimCameraSampleRecord, AimInputSampleRecord, AimShotRecord,
+    AimTargetEventRecord, AimTrialRecord, ConfigurationRecord, DisplayConfig, FovAxis,
+    FrameSample, InputCameraSample, InputIntegrityReport, MouseSample, ProcessedMouseSample,
+    SensitivityConfig, SessionRecord, ValidationResult,
 };
 
 #[test]
@@ -283,6 +284,16 @@ fn sample_aim_trial(status: &str) -> AimTrialRecord {
         sensitivity: 0.35,
         polling_rate_hz: 1_000.0,
         fov_degrees_h: 103.0,
+        pitch_model_id: "unverified_0.1".into(),
+        pitch_model_version: "1".into(),
+        pitch_config_json: r#"{"certainty":"UNCERTAIN"}"#.into(),
+        resolution_width: 1920,
+        resolution_height: 1080,
+        aspect_ratio: 1920.0 / 1080.0,
+        random_seed: 42,
+        task_version: "1".into(),
+        hardware_config_json: "{}".into(),
+        view_config_json: r#"{"projection":"perspective"}"#.into(),
         task_config_json: r#"{"hits_required":5,"target_radius":0.25}"#.into(),
         metrics_json: "{}".into(),
         start_unix_ms: 1_700_000_000_000,
@@ -310,6 +321,7 @@ fn sample_aim_shots() -> Vec<AimShotRecord> {
             target_y: 2.0,
             target_z: 10.0,
             target_radius: 0.25,
+            target_id: "target_001".into(),
         },
         AimShotRecord {
             shot_index: 1,
@@ -321,6 +333,7 @@ fn sample_aim_shots() -> Vec<AimShotRecord> {
             target_y: 1.5,
             target_z: 10.0,
             target_radius: 0.25,
+            target_id: "target_001".into(),
         },
     ]
 }
@@ -333,7 +346,7 @@ fn insert_completed_aim_trial_roundtrip_and_sequence() {
     let trial = sample_aim_trial("completed");
     let shots = sample_aim_shots();
     let trial_id = db
-        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .insert_completed_aim_trial("20260918", &trial, &shots, &[], &[], &[])
         .unwrap();
     assert_eq!(trial_id, "aim_20260918_000001");
 
@@ -393,7 +406,7 @@ fn insert_completed_aim_trial_roundtrip_and_sequence() {
     assert_eq!(rows[1], (1, false));
 
     let second_id = db
-        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .insert_completed_aim_trial("20260918", &trial, &shots, &[], &[], &[])
         .unwrap();
     assert_eq!(second_id, "aim_20260918_000002");
 }
@@ -406,7 +419,7 @@ fn insert_completed_aim_trial_rejects_non_completed_status() {
     let trial = sample_aim_trial("armed");
     let shots = sample_aim_shots();
     let error = db
-        .insert_completed_aim_trial("20260918", &trial, &shots)
+        .insert_completed_aim_trial("20260918", &trial, &shots, &[], &[], &[])
         .unwrap_err();
     assert!(
         error.contains("completed"),
@@ -436,13 +449,14 @@ fn insert_completed_aim_trial_rolls_back_on_duplicate_shot_index() {
         target_y: 2.0,
         target_z: 10.0,
         target_radius: 0.25,
+        target_id: "target_001".into(),
     };
     // Second row reuses shot_index 0 so the shot INSERT violates
     // PRIMARY KEY(trial_id, shot_index) after the parent aim_trials row is written.
     let duplicate_shots = vec![shot.clone(), shot];
 
     let error = db
-        .insert_completed_aim_trial("20260918", &trial, &duplicate_shots)
+        .insert_completed_aim_trial("20260918", &trial, &duplicate_shots, &[], &[], &[])
         .unwrap_err();
     assert!(
         !error.is_empty(),
@@ -459,4 +473,338 @@ fn insert_completed_aim_trial_rolls_back_on_duplicate_shot_index() {
         .unwrap();
     assert_eq!(trial_count, 0, "aim_trials must fully roll back");
     assert_eq!(shot_count, 0, "aim_shots must fully roll back");
+}
+
+#[test]
+fn insert_completed_aim_trial_roundtrips_five_layers() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let target_events = vec![
+        AimTargetEventRecord {
+            target_id: "target_001".into(),
+            event_index: 0,
+            timestamp_ns: 1_050_000_000,
+            event_type: "spawn".into(),
+            position_x: 1.0,
+            position_y: 2.0,
+            position_z: 10.0,
+            yaw_deg: Some(5.0),
+            pitch_deg: Some(-1.0),
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            velocity_z: 0.0,
+            event_data_json: r#"{"radius":0.25}"#.into(),
+        },
+        AimTargetEventRecord {
+            target_id: "target_001".into(),
+            event_index: 1,
+            timestamp_ns: 2_000_000_000,
+            event_type: "despawn".into(),
+            position_x: 1.0,
+            position_y: 2.0,
+            position_z: 10.0,
+            yaw_deg: None,
+            pitch_deg: None,
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            velocity_z: 0.0,
+            event_data_json: "{}".into(),
+        },
+    ];
+    let shots = vec![AimShotRecord {
+        shot_index: 0,
+        timestamp_ns: 1_900_000_000,
+        hit: true,
+        yaw_deg: 0.1,
+        pitch_deg: -0.2,
+        target_x: 1.0,
+        target_y: 2.0,
+        target_z: 10.0,
+        target_radius: 0.25,
+        target_id: "target_001".into(),
+    }];
+    // First sample: dt_ns=0; second: raw dt_ns differs from clamped dt_used_ns.
+    let input_samples = vec![
+        AimInputSampleRecord {
+            timestamp_ns: 1_100_000_000,
+            sequence_number: 0,
+            raw_dx: 1,
+            raw_dy: 0,
+            processed_dx: 1.0,
+            processed_dy: 0.0,
+            dt_ns: 0,
+            dt_used_ns: 0,
+            input_speed: None,
+            acceleration_scale: None,
+        },
+        AimInputSampleRecord {
+            timestamp_ns: 1_100_500_000,
+            sequence_number: 1,
+            raw_dx: 2,
+            raw_dy: -1,
+            processed_dx: 2.0,
+            processed_dy: -1.0,
+            dt_ns: 500_000,
+            dt_used_ns: 1_000_000,
+            input_speed: Some(2.236),
+            acceleration_scale: Some(1.0),
+        },
+    ];
+    let camera_samples = vec![
+        AimCameraSampleRecord {
+            timestamp_ns: 1_100_000_000,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_delta_deg: 0.0,
+            pitch_delta_deg: 0.0,
+        },
+        AimCameraSampleRecord {
+            timestamp_ns: 1_100_500_000,
+            yaw_deg: 0.14,
+            pitch_deg: -0.07,
+            yaw_delta_deg: 0.14,
+            pitch_delta_deg: -0.07,
+        },
+    ];
+
+    let trial_id = db
+        .insert_completed_aim_trial(
+            "20260919",
+            &trial,
+            &shots,
+            &target_events,
+            &input_samples,
+            &camera_samples,
+        )
+        .unwrap();
+    assert_eq!(trial_id, "aim_20260919_000001");
+
+    let (
+        pitch_model_id,
+        resolution_width,
+        aspect_ratio,
+        random_seed,
+        task_version,
+        hardware_config_json,
+        view_config_json,
+    ): (String, u32, f64, u64, String, String, String) = db
+        .connection
+        .query_row(
+            "SELECT pitch_model_id, resolution_width, aspect_ratio, random_seed,
+                    task_version, hardware_config_json, view_config_json
+             FROM aim_trials WHERE id = ?1",
+            [&trial_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get::<_, i64>(1)? as u32,
+                    row.get(2)?,
+                    row.get::<_, i64>(3)? as u64,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(pitch_model_id, trial.pitch_model_id);
+    assert_eq!(resolution_width, trial.resolution_width);
+    assert!((aspect_ratio - trial.aspect_ratio).abs() < f64::EPSILON);
+    assert_eq!(random_seed, trial.random_seed);
+    assert_eq!(task_version, trial.task_version);
+    assert_eq!(hardware_config_json, trial.hardware_config_json);
+    assert_eq!(view_config_json, trial.view_config_json);
+
+    let event_count: i64 = db
+        .connection
+        .query_row(
+            "SELECT COUNT(*) FROM aim_target_events WHERE trial_id = ?1",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let shot_count: i64 = db
+        .connection
+        .query_row(
+            "SELECT COUNT(*) FROM aim_shots WHERE trial_id = ?1",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let input_count: i64 = db
+        .connection
+        .query_row(
+            "SELECT COUNT(*) FROM aim_input_samples WHERE trial_id = ?1",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let camera_count: i64 = db
+        .connection
+        .query_row(
+            "SELECT COUNT(*) FROM aim_camera_samples WHERE trial_id = ?1",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(event_count, 2);
+    assert_eq!(shot_count, 1);
+    assert_eq!(input_count, 2);
+    assert_eq!(camera_count, 2);
+
+    let shot_target_id: String = db
+        .connection
+        .query_row(
+            "SELECT target_id FROM aim_shots WHERE trial_id = ?1 AND shot_index = 0",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(shot_target_id, "target_001");
+
+    let despawn_yaw: Option<f64> = db
+        .connection
+        .query_row(
+            "SELECT yaw_deg FROM aim_target_events
+             WHERE trial_id = ?1 AND event_type = 'despawn'",
+            [&trial_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(despawn_yaw, None);
+
+    let (dt_ns, dt_used_ns, input_speed, acceleration_scale): (
+        u64,
+        u64,
+        Option<f64>,
+        Option<f64>,
+    ) = db
+        .connection
+        .query_row(
+            "SELECT dt_ns, dt_used_ns, input_speed, acceleration_scale
+             FROM aim_input_samples
+             WHERE trial_id = ?1 AND sequence_number = 1",
+            [&trial_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as u64,
+                    row.get::<_, i64>(1)? as u64,
+                    row.get(2)?,
+                    row.get(3)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(dt_ns, 500_000, "dt_ns must store raw QPC interval");
+    assert_eq!(dt_used_ns, 1_000_000, "dt_used_ns must store clamped interval");
+    assert_ne!(dt_ns, dt_used_ns);
+    assert!((input_speed.unwrap() - 2.236).abs() < 1e-9);
+    assert!((acceleration_scale.unwrap() - 1.0).abs() < f64::EPSILON);
+
+    let (yaw_deg, yaw_delta_deg): (f64, f64) = db
+        .connection
+        .query_row(
+            "SELECT yaw_deg, yaw_delta_deg FROM aim_camera_samples
+             WHERE trial_id = ?1 AND timestamp_ns = 1100500000",
+            [&trial_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!((yaw_deg - 0.14).abs() < f64::EPSILON);
+    assert!((yaw_delta_deg - 0.14).abs() < f64::EPSILON);
+}
+
+#[test]
+fn insert_completed_aim_trial_rolls_back_all_layers_on_child_failure() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let target_events = vec![AimTargetEventRecord {
+        target_id: "target_001".into(),
+        event_index: 0,
+        timestamp_ns: 1_050_000_000,
+        event_type: "spawn".into(),
+        position_x: 0.0,
+        position_y: 0.0,
+        position_z: 10.0,
+        yaw_deg: None,
+        pitch_deg: None,
+        velocity_x: 0.0,
+        velocity_y: 0.0,
+        velocity_z: 0.0,
+        event_data_json: "{}".into(),
+    }];
+    let shot = AimShotRecord {
+        shot_index: 0,
+        timestamp_ns: 1_100_000_000,
+        hit: true,
+        yaw_deg: 0.0,
+        pitch_deg: 0.0,
+        target_x: 0.0,
+        target_y: 0.0,
+        target_z: 10.0,
+        target_radius: 0.25,
+        target_id: "target_001".into(),
+    };
+    let duplicate_shots = vec![shot.clone(), shot];
+    let input_samples = vec![AimInputSampleRecord {
+        timestamp_ns: 1_100_000_000,
+        sequence_number: 0,
+        raw_dx: 0,
+        raw_dy: 0,
+        processed_dx: 0.0,
+        processed_dy: 0.0,
+        dt_ns: 0,
+        dt_used_ns: 0,
+        input_speed: None,
+        acceleration_scale: None,
+    }];
+    let camera_samples = vec![AimCameraSampleRecord {
+        timestamp_ns: 1_100_000_000,
+        yaw_deg: 0.0,
+        pitch_deg: 0.0,
+        yaw_delta_deg: 0.0,
+        pitch_delta_deg: 0.0,
+    }];
+
+    let error = db
+        .insert_completed_aim_trial(
+            "20260919",
+            &trial,
+            &duplicate_shots,
+            &target_events,
+            &input_samples,
+            &camera_samples,
+        )
+        .unwrap_err();
+    assert!(!error.is_empty());
+
+    let trial_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_trials", [], |row| row.get(0))
+        .unwrap();
+    let event_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_target_events", [], |row| row.get(0))
+        .unwrap();
+    let shot_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_shots", [], |row| row.get(0))
+        .unwrap();
+    let input_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_input_samples", [], |row| row.get(0))
+        .unwrap();
+    let camera_count: i64 = db
+        .connection
+        .query_row("SELECT COUNT(*) FROM aim_camera_samples", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(trial_count, 0, "aim_trials must fully roll back");
+    assert_eq!(event_count, 0, "aim_target_events must fully roll back");
+    assert_eq!(shot_count, 0, "aim_shots must fully roll back");
+    assert_eq!(input_count, 0, "aim_input_samples must fully roll back");
+    assert_eq!(camera_count, 0, "aim_camera_samples must fully roll back");
 }
