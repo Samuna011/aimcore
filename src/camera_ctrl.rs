@@ -111,19 +111,43 @@ pub fn drain_mouse_to_camera(
             &mut live,
             accumulate_stats,
         );
-        if aim.phase == AimPhase::Armed && left_button_down(sample.buttons) {
-            if apply_aim_shot(&mut aim, &camera, sample.timestamp_ns) {
-                let status = match unix_time_ms() {
-                    Ok(end_unix_ms) => persist_completed_aim_trial(
-                        &settings,
-                        &active_processor,
-                        &mut aim,
-                        end_unix_ms,
-                        sample.timestamp_ns,
+        if aim.phase == AimPhase::Armed {
+            let (dt_used_ns, input_speed, acceleration_scale) =
+                match active_processor.processor.last_linear_eval() {
+                    Some(e) => (
+                        (e.dt_ms * 1e6) as u64,
+                        Some(e.input_speed),
+                        Some(e.acceleration_scale),
                     ),
-                    Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+                    // none: dt_used_ns = dt_ns; speed/scale NULL
+                    None => (aim.next_input_dt_ns(sample.timestamp_ns), None, None),
                 };
-                aim.last_persist = Some(status);
+            aim.push_aim_input_sample(
+                sample.timestamp_ns,
+                sample.dx,
+                sample.dy,
+                processed_dx,
+                processed_dy,
+                dt_used_ns,
+                input_speed,
+                acceleration_scale,
+            );
+            aim.push_aim_camera_sample(sample.timestamp_ns, camera.yaw_deg, camera.pitch_deg);
+
+            if left_button_down(sample.buttons) {
+                if apply_aim_shot(&mut aim, &camera, sample.timestamp_ns) {
+                    let status = match unix_time_ms() {
+                        Ok(end_unix_ms) => persist_completed_aim_trial(
+                            &settings,
+                            &active_processor,
+                            &mut aim,
+                            end_unix_ms,
+                            sample.timestamp_ns,
+                        ),
+                        Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+                    };
+                    aim.last_persist = Some(status);
+                }
             }
         }
         if accumulate_stats {

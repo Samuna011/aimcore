@@ -2,7 +2,10 @@
 
 use bevy::prelude::*;
 
-use sense_types::{AimShotRecord, AimTargetEventRecord, AimTrialRecord};
+use sense_types::{
+    AimCameraSampleRecord, AimInputSampleRecord, AimShotRecord, AimTargetEventRecord,
+    AimTrialRecord,
+};
 
 use crate::{
     camera_ctrl::YawPitch,
@@ -106,10 +109,16 @@ pub struct AimTrial {
     pub score_secs: Option<f64>,
     pub shot_log: Vec<AimShotRecord>,
     pub target_events: Vec<AimTargetEventRecord>,
+    pub input_log: Vec<AimInputSampleRecord>,
+    pub camera_log: Vec<AimCameraSampleRecord>,
     pub random_seed: u64,
     pub current_target_id: String,
     pub next_target_ordinal: u32,
     pub last_persist: Option<AimPersistStatus>,
+    input_seq: u64,
+    last_raw_timestamp_ns: Option<u64>,
+    last_yaw_for_cam: f64,
+    last_pitch_for_cam: f64,
     rng_state: u64,
 }
 
@@ -128,12 +137,88 @@ impl Default for AimTrial {
             score_secs: None,
             shot_log: Vec::new(),
             target_events: Vec::new(),
+            input_log: Vec::new(),
+            camera_log: Vec::new(),
             random_seed: 0,
             current_target_id: String::new(),
             next_target_ordinal: 1,
             last_persist: None,
+            input_seq: 0,
+            last_raw_timestamp_ns: None,
+            last_yaw_for_cam: 0.0,
+            last_pitch_for_cam: 0.0,
             rng_state: 0xC0FFEE,
         }
+    }
+}
+
+impl AimTrial {
+    /// Raw QPC interval that the next `push_aim_input_sample` would record.
+    pub fn next_input_dt_ns(&self, timestamp_ns: u64) -> u64 {
+        match self.last_raw_timestamp_ns {
+            Some(prev) => timestamp_ns.saturating_sub(prev),
+            None => 0,
+        }
+    }
+
+    /// Buffer one raw+processed input sample. `dt_ns` is the raw QPC interval (0 first).
+    pub fn push_aim_input_sample(
+        &mut self,
+        timestamp_ns: u64,
+        raw_dx: i32,
+        raw_dy: i32,
+        processed_dx: f64,
+        processed_dy: f64,
+        dt_used_ns: u64,
+        input_speed: Option<f64>,
+        acceleration_scale: Option<f64>,
+    ) {
+        let dt_ns = self.next_input_dt_ns(timestamp_ns);
+        let sequence_number = self.input_seq;
+        self.input_seq = self.input_seq.saturating_add(1);
+        self.last_raw_timestamp_ns = Some(timestamp_ns);
+        self.input_log.push(AimInputSampleRecord {
+            timestamp_ns,
+            sequence_number,
+            raw_dx,
+            raw_dy,
+            processed_dx,
+            processed_dy,
+            dt_ns,
+            dt_used_ns,
+            input_speed,
+            acceleration_scale,
+        });
+    }
+
+    /// Buffer camera pose after apply; deltas are vs previous sample (0,0 first).
+    pub fn push_aim_camera_sample(&mut self, timestamp_ns: u64, yaw_deg: f64, pitch_deg: f64) {
+        let (yaw_delta_deg, pitch_delta_deg) = if self.camera_log.is_empty() {
+            (0.0, 0.0)
+        } else {
+            (
+                yaw_deg - self.last_yaw_for_cam,
+                pitch_deg - self.last_pitch_for_cam,
+            )
+        };
+        self.last_yaw_for_cam = yaw_deg;
+        self.last_pitch_for_cam = pitch_deg;
+        self.camera_log.push(AimCameraSampleRecord {
+            timestamp_ns,
+            yaw_deg,
+            pitch_deg,
+            yaw_delta_deg,
+            pitch_delta_deg,
+        });
+    }
+
+    fn clear_sample_logs(&mut self) {
+        self.input_log.clear();
+        self.camera_log.clear();
+        self.input_seq = 0;
+        self.last_raw_timestamp_ns = None;
+        self.last_yaw_for_cam = 0.0;
+        self.last_pitch_for_cam = 0.0;
     }
 }
 
@@ -197,6 +282,7 @@ pub fn start_aim_trial(
     trial.score_secs = None;
     trial.shot_log.clear();
     trial.target_events.clear();
+    trial.clear_sample_logs();
     trial.next_target_ordinal = 1;
     trial.current_target_id.clear();
     trial.start_timestamp_ns = now_ns;
@@ -210,6 +296,7 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.hits = 0;
         trial.shot_log.clear();
         trial.target_events.clear();
+        trial.clear_sample_logs();
         trial.score_secs = None;
         trial.last_hit = None;
         trial.current_target_id.clear();
@@ -640,6 +727,8 @@ mod tests {
         assert!(trial.last_persist.is_none());
         assert!(trial.shot_log.is_empty());
         assert!(trial.target_events.is_empty());
+        assert!(trial.input_log.is_empty());
+        assert!(trial.camera_log.is_empty());
         assert_eq!(trial.hits, 0);
     }
 
@@ -882,5 +971,128 @@ mod tests {
         assert_eq!(err.hits, 5);
         assert_eq!(err.shots, 6);
         assert!((err.score_secs - 0.42).abs() < 1e-9);
+    }
+
+    #[test]
+    fn push_input_sample_raw_dt_and_seq() {
+        let mut trial = AimTrial::default();
+        // First sample: dt_ns = 0; none-processor path uses dt_used_ns = dt_ns, speed/scale None.
+        trial.push_aim_input_sample(
+            1_000_000_000,
+            10,
+            -4,
+            10.0,
+            -4.0,
+            0, // dt_used_ns matches first-sample dt_ns
+            None,
+            None,
+        );
+        assert_eq!(trial.input_log.len(), 1);
+        let s0 = &trial.input_log[0];
+        assert_eq!(s0.timestamp_ns, 1_000_000_000);
+        assert_eq!(s0.sequence_number, 0);
+        assert_eq!(s0.raw_dx, 10);
+        assert_eq!(s0.raw_dy, -4);
+        assert_eq!(s0.processed_dx, 10.0);
+        assert_eq!(s0.processed_dy, -4.0);
+        assert_eq!(s0.dt_ns, 0);
+        assert_eq!(s0.dt_used_ns, 0);
+        assert!(s0.input_speed.is_none());
+        assert!(s0.acceleration_scale.is_none());
+
+        // Second sample: raw QPC interval; dt_used from Linear clamp (e.g. 1 ms while raw was 0.1 ms).
+        trial.push_aim_input_sample(
+            1_000_100_000,
+            3,
+            4,
+            4.5,
+            6.0,
+            1_000_000, // dt_used_ns from eval.dt_ms * 1e6
+            Some(50.0),
+            Some(1.5),
+        );
+        assert_eq!(trial.input_log.len(), 2);
+        let s1 = &trial.input_log[1];
+        assert_eq!(s1.sequence_number, 1);
+        assert_eq!(s1.dt_ns, 100_000); // raw 0.1 ms
+        assert_eq!(s1.dt_used_ns, 1_000_000);
+        assert_eq!(s1.input_speed, Some(50.0));
+        assert_eq!(s1.acceleration_scale, Some(1.5));
+    }
+
+    #[test]
+    fn push_camera_sample_deltas_from_previous() {
+        let mut trial = AimTrial::default();
+        trial.push_aim_camera_sample(1_000_000_000, 1.5, -0.25);
+        assert_eq!(trial.camera_log.len(), 1);
+        let c0 = &trial.camera_log[0];
+        assert_eq!(c0.timestamp_ns, 1_000_000_000);
+        assert_eq!(c0.yaw_deg, 1.5);
+        assert_eq!(c0.pitch_deg, -0.25);
+        assert_eq!(c0.yaw_delta_deg, 0.0);
+        assert_eq!(c0.pitch_delta_deg, 0.0);
+
+        trial.push_aim_camera_sample(1_000_001_000, 2.0, -0.5);
+        let c1 = &trial.camera_log[1];
+        assert!((c1.yaw_delta_deg - 0.5).abs() < 1e-12);
+        assert!((c1.pitch_delta_deg - (-0.25)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn start_and_cancel_clear_input_and_camera_logs() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let now = 1_000_000_000u64;
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            42,
+        ));
+
+        trial.push_aim_input_sample(now + 1, 1, 0, 1.0, 0.0, 0, None, None);
+        trial.push_aim_camera_sample(now + 1, 0.1, 0.0);
+        assert!(!trial.input_log.is_empty());
+        assert!(!trial.camera_log.is_empty());
+
+        cancel_aim_trial(&mut trial);
+        assert!(trial.input_log.is_empty());
+        assert!(trial.camera_log.is_empty());
+
+        // Restart must also clear any leftover (and reset seq/timing).
+        trial.input_log.push(AimInputSampleRecord {
+            timestamp_ns: 99,
+            sequence_number: 99,
+            raw_dx: 0,
+            raw_dy: 0,
+            processed_dx: 0.0,
+            processed_dy: 0.0,
+            dt_ns: 0,
+            dt_used_ns: 0,
+            input_speed: None,
+            acceleration_scale: None,
+        });
+        trial.camera_log.push(AimCameraSampleRecord {
+            timestamp_ns: 99,
+            yaw_deg: 9.0,
+            pitch_deg: 9.0,
+            yaw_delta_deg: 0.0,
+            pitch_delta_deg: 0.0,
+        });
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now + 10,
+            1_700_000_000_010,
+            7,
+        ));
+        assert!(trial.input_log.is_empty());
+        assert!(trial.camera_log.is_empty());
+        trial.push_aim_input_sample(now + 11, 2, 0, 2.0, 0.0, 0, None, None);
+        assert_eq!(trial.input_log[0].sequence_number, 0);
+        assert_eq!(trial.input_log[0].dt_ns, 0);
     }
 }
