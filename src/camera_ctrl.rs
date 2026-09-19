@@ -5,19 +5,14 @@ use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 use crate::{
     aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
     aim_trial::{
-        aim_persist_status_from_insert, apply_aim_shot, left_button_down, on_look_disabled,
-        AimPhase, AimTaskKind, AimTrial,
+        aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTaskKind,
+        AimTrial,
     },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
-    session::{persist_completed_aim_trial, unix_time_ms, ValidationSession},
+    lab_ui::{LabScreen, LabUi},
+    session::{persist_completed_aim_trial, unix_time_ms},
 };
-
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct LookCapturePrev {
-    /// Previous frame's `LookCapture.enabled` for falling-edge cancel.
-    pub enabled: bool,
-}
 
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct YawPitch {
@@ -79,24 +74,13 @@ pub fn drain_mouse_to_camera(
     mut buffers: ResMut<TelemetryBuffers>,
     validation: Res<ValidationState>,
     look: Res<LookCapture>,
-    mut look_prev: ResMut<LookCapturePrev>,
+    ui: Res<LabUi>,
     mut aim: ResMut<AimTrial>,
-    mut session: ResMut<ValidationSession>,
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
-    // While look is unlocked (ESC UI), discard mouse samples so egui clicks don't aim.
-    // Cancel Armed only on look *falling edge* (was capturing → unlocked). Starting
-    // Gridshot/STATIC_CLICK from the HUD happens while look is already unlocked; a
-    // level-triggered cancel would abort the new run on the next frame.
-    let look_enabled = look.enabled;
-    let falling_edge = look_prev.enabled && !look_enabled;
-    look_prev.enabled = look_enabled;
-    if !look_enabled {
-        if falling_edge && on_look_disabled(&mut aim) {
-            session.status_message =
-                Some("Aim run cancelled — look unlocked (ESC) mid-trial.".into());
-        }
+    // Paused/lobby input is intentionally discarded without aborting the trial.
+    if !look.enabled || ui.screen != LabScreen::Playing {
         return;
     }
     let accumulate_stats = validation.is_running();

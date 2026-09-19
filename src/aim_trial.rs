@@ -442,18 +442,6 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
     trial.phase = AimPhase::Idle;
 }
 
-/// When look capture is disabled (ESC UI mode), abort an Armed run so discarded
-/// mouse samples cannot leave silent gaps in a completed trial.
-/// Returns true if a trial was cancelled.
-pub fn on_look_disabled(aim: &mut AimTrial) -> bool {
-    if aim.phase == AimPhase::Armed {
-        cancel_aim_trial(aim);
-        true
-    } else {
-        false
-    }
-}
-
 pub fn static_click_task_config_json() -> String {
     format!(
         r#"{{"hits_required":{},"target_radius":{},"aim_distance":{},"yaw_half_deg":{},"pitch_up_deg":{},"pitch_down_deg":{},"floor_clearance":{},"rng":"lcg","rng_version":"1"}}"#,
@@ -1094,52 +1082,6 @@ mod tests {
         assert_eq!(record.resolution_width, 1920);
         assert_eq!(record.resolution_height, 1080);
         assert!(record.view_config_json.contains("\"horizontal_fov_deg\":103"));
-    }
-
-    #[test]
-    fn look_falling_edge_only_not_level() {
-        // Documented contract for LookCapturePrev: starting while look is already
-        // unlocked must not cancel; only enabled→disabled cancels.
-        let mut prev = false;
-        let mut look = false; // unlocked (HUD)
-        let falling = prev && !look;
-        assert!(!falling);
-        prev = look;
-
-        look = true; // user locks look to aim
-        let falling = prev && !look;
-        assert!(!falling);
-        prev = look;
-
-        look = false; // ESC mid-run
-        let falling = prev && !look;
-        assert!(falling);
-    }
-
-    #[test]
-    fn on_look_disabled_cancels_armed_only() {
-        let mut idle = AimTrial::default();
-        assert!(!on_look_disabled(&mut idle));
-        assert_eq!(idle.phase, AimPhase::Idle);
-
-        let mut trial = AimTrial::default();
-        let mut pose = YawPitch::default();
-        assert!(start_aim_trial(
-            &mut pose,
-            &mut trial,
-            ValidationState::Idle,
-            1_000_000_000,
-            1_700_000_000_000,
-            42,
-            test_config(),
-        ));
-        trial.push_aim_input_sample(1_000_000_001, 1, 0, 1.0, 0.0, 0, None, None);
-        assert!(on_look_disabled(&mut trial));
-        assert_eq!(trial.phase, AimPhase::Idle);
-        assert!(trial.shot_log.is_empty());
-        assert!(trial.input_log.is_empty());
-        assert!(trial.config_snapshot.is_none());
-        assert!(!on_look_disabled(&mut trial));
     }
 
     #[test]

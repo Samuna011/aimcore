@@ -15,6 +15,7 @@ use crate::{
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     frame_telemetry::{record_frame_telemetry, LiveFrameStats},
     input_plugin::RawInputPlugin,
+    lab_ui::{handle_lab_keys, look_should_be_enabled, LabUi},
     scene::{maintain_horizontal_fov, setup_scene},
     session::ValidationSession,
     validation_lab::draw_hud,
@@ -31,8 +32,8 @@ pub fn run() {
         .init_resource::<LiveFrameStats>()
         .init_resource::<ValidationSession>()
         .init_resource::<LookCapture>()
-        .init_resource::<crate::camera_ctrl::LookCapturePrev>()
         .init_resource::<AimTrial>()
+        .init_resource::<LabUi>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "sense-maxer — VALORANT Validation Lab".into(),
@@ -50,7 +51,7 @@ pub fn run() {
         .add_systems(
             Update,
             (
-                toggle_look_capture,
+                handle_lab_ui_keys,
                 apply_cursor_capture,
                 drain_mouse_to_camera,
                 apply_yaw_transform,
@@ -64,10 +65,15 @@ pub fn run() {
         .run();
 }
 
-fn toggle_look_capture(keys: Res<ButtonInput<KeyCode>>, mut look: ResMut<LookCapture>) {
-    if keys.just_pressed(KeyCode::Escape) {
-        look.enabled = !look.enabled;
-    }
+fn handle_lab_ui_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ui: ResMut<LabUi>,
+    mut aim: ResMut<AimTrial>,
+    mut look: ResMut<LookCapture>,
+) {
+    let now = sense_input_win::monotonic_now_ns();
+    handle_lab_keys(&keys, &mut ui, &mut aim, now);
+    look.enabled = look_should_be_enabled(&ui);
 }
 
 fn apply_cursor_capture(
