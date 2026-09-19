@@ -168,7 +168,14 @@ pub fn draw_hud(
                     match unix_time_ms() {
                         Ok(start_ms) => {
                             let now = sense_input_win::monotonic_now_ns();
-                            if start_aim_trial(&mut pose, &mut aim, *validation, now, start_ms)
+                            if start_aim_trial(
+                                &mut pose,
+                                &mut aim,
+                                *validation,
+                                now,
+                                start_ms,
+                                now,
+                            )
                             {
                                 session.status_message = Some(format!(
                                     "Aim run armed — destroy {AIM_HITS_TO_FINISH} green spheres (LMB). Miss keeps the same target."
