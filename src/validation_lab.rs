@@ -6,7 +6,7 @@ use sense_accel::CapMode;
 
 use crate::{
     aim_gridshot::{start_gridshot_trial, GRIDSHOT_CONCURRENT, GRIDSHOT_DURATION_SECS},
-    aim_replay::AimReplay,
+    aim_replay::{live_targets_at, AimReplay},
     aim_trial::{
         active_elapsed_ns, cancel_aim_trial, end_aim_pause, start_aim_trial, AimPhase,
         AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_EXPERIMENT_VERSION, AIM_HITS_TO_FINISH,
@@ -86,6 +86,10 @@ pub fn draw_hud(
         draw_playing_hud(ctx, &aim, &lab_ui, &live_input, &live_frame, &pose);
         return Ok(());
     }
+    if lab_ui.screen == LabScreen::HistoryReplay {
+        draw_crosshair(ctx);
+        draw_replay_flash(ctx, &replay);
+    }
 
     let title = match (lab_ui.screen, lab_ui.nested) {
         (LabScreen::Lobby, LabNested::None) => "Sense Maxer — Lobby",
@@ -119,7 +123,7 @@ pub fn draw_hud(
                 draw_history_list(ui, &replay, &mut action);
             }
             LabNested::None if lab_ui.screen == LabScreen::HistoryReplay => {
-                draw_history_replay(ui, &replay, &mut action);
+                draw_history_replay(ui, &mut replay, &mut action);
             }
             LabNested::Settings => {
                 draw_settings(ui, &mut settings, settings_locked);
@@ -394,22 +398,87 @@ fn draw_history_list(ui: &mut egui::Ui, replay: &AimReplay, action: &mut Option<
         });
 }
 
-fn draw_history_replay(ui: &mut egui::Ui, replay: &AimReplay, action: &mut Option<HudAction>) {
-    ui.label("Arena replay transport arrives in Task 3.");
-    if let Some(bundle) = replay.bundle.as_ref() {
-        ui.monospace(format!(
-            "{} · {} · {}",
-            bundle.trial.id,
-            bundle.trial.trial_type,
-            if replay.playing { "PLAYING" } else { "PAUSED" },
-        ));
-        ui.small("Esc toggles play/pause.");
-    } else {
+fn draw_history_replay(ui: &mut egui::Ui, replay: &mut AimReplay, action: &mut Option<HudAction>) {
+    let Some(bundle) = replay.bundle.as_ref() else {
         ui.colored_label(egui::Color32::LIGHT_RED, "Replay bundle is not loaded.");
+        if ui.button("Back").clicked() {
+            *action = Some(HudAction::Back);
+        }
+        return;
+    };
+    let start_ns = bundle.trial.start_timestamp_ns;
+    let end_ns = bundle.trial.end_timestamp_ns.max(start_ns);
+    let duration_s = end_ns.saturating_sub(start_ns) as f64 / 1e9;
+    let trial_id = bundle.trial.id.clone();
+    let trial_type = bundle.trial.trial_type.clone();
+    let live_count = live_targets_at(&bundle.target_events, replay.t_ns).len();
+    let mut position_s = replay.t_ns.saturating_sub(start_ns) as f64 / 1e9;
+
+    ui.horizontal(|ui| {
+        if ui
+            .button(if replay.playing { "Pause" } else { "Play" })
+            .clicked()
+        {
+            if replay.t_ns >= end_ns {
+                replay.t_ns = start_ns;
+            }
+            replay.playing = !replay.playing;
+        }
+        ui.label("Speed");
+        for (speed, label) in [(1.0, "1×"), (2.0, "2×"), (4.0, "4×")] {
+            ui.selectable_value(&mut replay.speed, speed, label);
+        }
+    });
+    if ui
+        .add(
+            egui::Slider::new(&mut position_s, 0.0..=duration_s)
+                .show_value(false)
+                .text("Timeline"),
+        )
+        .changed()
+    {
+        replay.t_ns = start_ns
+            .saturating_add((position_s * 1e9) as u64)
+            .min(end_ns);
+        replay.playing = false;
+        replay.flash_remaining_secs = 0.0;
+        replay.last_shot = bundle
+            .shots
+            .iter()
+            .filter(|shot| shot.timestamp_ns <= replay.t_ns)
+            .max_by_key(|shot| shot.timestamp_ns)
+            .map(|shot| shot.hit);
     }
+    ui.monospace(format!(
+        "{trial_id} · {trial_type} · {:.3}/{duration_s:.3}s · {:.0}× · targets {live_count}",
+        position_s.min(duration_s),
+        replay.speed,
+    ));
+    ui.monospace(match replay.last_shot {
+        Some(true) => "LAST SHOT: HIT",
+        Some(false) => "LAST SHOT: MISS",
+        None => "LAST SHOT: —",
+    });
+    ui.small("Esc toggles play/pause.");
     if ui.button("Back").clicked() {
         *action = Some(HudAction::Back);
     }
+}
+
+fn draw_replay_flash(ctx: &egui::Context, replay: &AimReplay) {
+    if replay.flash_remaining_secs <= 0.0 {
+        return;
+    }
+    let (label, color) = if replay.last_shot == Some(true) {
+        ("HIT", egui::Color32::LIGHT_GREEN)
+    } else {
+        ("MISS", egui::Color32::LIGHT_RED)
+    };
+    egui::Area::new(egui::Id::new("replay_shot_flash"))
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 28.0])
+        .show(ctx, |ui| {
+            ui.colored_label(color, egui::RichText::new(label).strong().size(22.0));
+        });
 }
 
 fn draw_last_result(ui: &mut egui::Ui, result: &LightweightResult) {

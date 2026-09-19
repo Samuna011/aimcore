@@ -7,7 +7,7 @@ use bevy::{
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 use crate::{
-    aim_replay::AimReplay,
+    aim_replay::{tick_aim_replay, AimReplay},
     aim_trial::{spawn_aim_arena, spawn_aim_target, sync_aim_target, AimTrial},
     camera_ctrl::{
         apply_yaw_transform, drain_mouse_to_camera, ActiveInputProcessor, LiveInputStats,
@@ -56,6 +56,7 @@ pub fn run() {
                 handle_lab_ui_keys,
                 apply_cursor_capture,
                 drain_mouse_to_camera,
+                tick_aim_replay,
                 apply_yaw_transform,
                 sync_aim_target,
                 record_frame_telemetry,

@@ -147,6 +147,8 @@ pub fn enter_history_replay(ui: &mut LabUi, replay: &mut AimReplay, bundle: AimT
     replay.bundle = Some(bundle);
     replay.playing = true;
     replay.speed = 1.0;
+    replay.last_shot = None;
+    replay.flash_remaining_secs = 0.0;
     replay.load_error = None;
     ui.screen = LabScreen::HistoryReplay;
     ui.nested = LabNested::None;
@@ -156,6 +158,8 @@ pub fn leave_history_replay(ui: &mut LabUi, replay: &mut AimReplay, yaw: &mut Ya
     replay.bundle = None;
     replay.playing = false;
     replay.t_ns = 0;
+    replay.last_shot = None;
+    replay.flash_remaining_secs = 0.0;
     replay.load_error = None;
     yaw.yaw_deg = 0.0;
     yaw.pitch_deg = 0.0;

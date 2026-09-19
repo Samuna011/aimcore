@@ -1,8 +1,15 @@
 use std::collections::BTreeMap;
 
-use bevy::prelude::Resource;
+use bevy::prelude::{Camera3d, Res, ResMut, Resource, Single, Time, With};
 use sense_telemetry::{AimTrialReplayBundle, AimTrialSummary};
 use sense_types::{AimCameraSampleRecord, AimShotRecord, AimTargetEventRecord};
+
+use crate::{
+    camera_ctrl::YawPitch,
+    lab_ui::{LabScreen, LabUi},
+};
+
+const SHOT_FLASH_SECS: f32 = 0.15;
 
 #[derive(Resource, Debug)]
 pub struct AimReplay {
@@ -11,6 +18,8 @@ pub struct AimReplay {
     pub playing: bool,
     pub speed: f32,
     pub t_ns: u64,
+    pub last_shot: Option<bool>,
+    pub flash_remaining_secs: f32,
     pub load_error: Option<String>,
 }
 
@@ -22,9 +31,26 @@ impl Default for AimReplay {
             playing: false,
             speed: 1.0,
             t_ns: 0,
+            last_shot: None,
+            flash_remaining_secs: 0.0,
             load_error: None,
         }
     }
+}
+
+pub fn advance_replay_t(
+    playing: bool,
+    speed: f32,
+    dt_s: f64,
+    t_ns: u64,
+    end_ns: u64,
+) -> (u64, bool) {
+    if !playing {
+        return (t_ns.min(end_ns), false);
+    }
+    let dt_ns = (dt_s.max(0.0) * f64::from(speed.max(0.0)) * 1e9) as u64;
+    let next = t_ns.saturating_add(dt_ns).min(end_ns);
+    (next, next < end_ns)
 }
 
 pub fn camera_pose_at(samples: &[AimCameraSampleRecord], t_ns: u64) -> (f64, f64) {
@@ -64,11 +90,66 @@ pub fn shots_crossed(shots: &[AimShotRecord], prev_t: u64, t_ns: u64) -> Vec<&Ai
         .collect()
 }
 
+pub fn tick_aim_replay(
+    time: Res<Time>,
+    mut replay: ResMut<AimReplay>,
+    ui: Res<LabUi>,
+    mut yaw: Single<&mut YawPitch, With<Camera3d>>,
+) {
+    if ui.screen != LabScreen::HistoryReplay {
+        return;
+    }
+    let Some(end_ns) = replay
+        .bundle
+        .as_ref()
+        .map(|bundle| bundle.trial.end_timestamp_ns)
+    else {
+        return;
+    };
+
+    let prev_t = replay.t_ns;
+    let (next_t, playing) = advance_replay_t(
+        replay.playing,
+        replay.speed,
+        time.delta_secs_f64(),
+        replay.t_ns,
+        end_ns,
+    );
+    let (crossed_shot, (yaw_deg, pitch_deg)) = {
+        let bundle = replay.bundle.as_ref().expect("bundle checked above");
+        let crossed_shot = if next_t > prev_t {
+            shots_crossed(&bundle.shots, prev_t, next_t)
+                .last()
+                .map(|shot| shot.hit)
+        } else {
+            None
+        };
+        (
+            crossed_shot,
+            camera_pose_at(&bundle.camera_samples, next_t),
+        )
+    };
+    replay.t_ns = next_t;
+    replay.playing = playing;
+    replay.flash_remaining_secs =
+        (replay.flash_remaining_secs - time.delta_secs()).max(0.0);
+
+    if let Some(hit) = crossed_shot {
+        replay.last_shot = Some(hit);
+        replay.flash_remaining_secs = SHOT_FLASH_SECS;
+    }
+
+    yaw.yaw_deg = yaw_deg;
+    yaw.pitch_deg = pitch_deg;
+}
+
 #[cfg(test)]
 mod tests {
     use sense_types::{AimCameraSampleRecord, AimShotRecord, AimTargetEventRecord};
 
-    use super::{camera_pose_at, live_targets_at, shots_crossed, AimReplay};
+    use super::{
+        advance_replay_t, camera_pose_at, live_targets_at, shots_crossed, AimReplay,
+    };
 
     fn camera_sample(timestamp_ns: u64, yaw_deg: f64, pitch_deg: f64) -> AimCameraSampleRecord {
         AimCameraSampleRecord {
@@ -173,6 +254,26 @@ mod tests {
                 .map(|shot| shot.shot_index)
                 .collect::<Vec<_>>(),
             vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn advance_replay_t_applies_speed_and_pauses_at_end() {
+        assert_eq!(
+            advance_replay_t(true, 2.0, 0.25, 1_000_000_000, 2_000_000_000),
+            (1_500_000_000, true)
+        );
+        assert_eq!(
+            advance_replay_t(true, 4.0, 0.25, 1_500_000_000, 2_000_000_000),
+            (2_000_000_000, false)
+        );
+    }
+
+    #[test]
+    fn advance_replay_t_does_not_move_while_paused() {
+        assert_eq!(
+            advance_replay_t(false, 4.0, 1.0, 1_500_000_000, 2_000_000_000),
+            (1_500_000_000, false)
         );
     }
 }

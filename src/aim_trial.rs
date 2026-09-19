@@ -8,8 +8,10 @@ use sense_types::{
 };
 
 use crate::{
+    aim_replay::{live_targets_at, AimReplay},
     camera_ctrl::YawPitch,
     config::{ExperimentSettings, ValidationState},
+    lab_ui::{LabScreen, LabUi},
 };
 
 /// Windows raw input: left button down bit in `RAWINPUT` mouse `ulButtons`.
@@ -712,8 +714,27 @@ pub fn spawn_aim_arena(
 
 pub fn sync_aim_target(
     trial: Res<AimTrial>,
+    replay: Res<AimReplay>,
+    ui: Res<LabUi>,
     mut targets: Query<(&AimTargetSlot, &mut Visibility, &mut Transform), With<AimTarget>>,
 ) {
+    if ui.screen == LabScreen::HistoryReplay {
+        let live_targets = replay
+            .bundle
+            .as_ref()
+            .map(|bundle| live_targets_at(&bundle.target_events, replay.t_ns))
+            .unwrap_or_default();
+        for (slot, mut visibility, mut transform) in &mut targets {
+            if let Some((_, x, y, z)) = live_targets.get(slot.0) {
+                *visibility = Visibility::Visible;
+                transform.translation = Vec3::new(*x as f32, *y as f32, *z as f32);
+            } else {
+                *visibility = Visibility::Hidden;
+            }
+        }
+        return;
+    }
+
     let armed = trial.phase == AimPhase::Armed;
     for (slot, mut visibility, mut transform) in &mut targets {
         if !armed {
