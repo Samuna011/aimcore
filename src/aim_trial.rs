@@ -70,6 +70,21 @@ pub enum AimPhase {
     Armed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AimTaskKind {
+    #[default]
+    StaticClick,
+    Gridshot,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveAimTarget {
+    pub target_id: String,
+    pub row: i32,
+    pub col: i32,
+    pub center: Vec3,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AimPersistStatus {
     pub trial_id: Option<String>,
@@ -173,6 +188,8 @@ impl AimRunConfigSnapshot {
 #[derive(Resource, Debug, Clone)]
 pub struct AimTrial {
     pub phase: AimPhase,
+    pub task_kind: AimTaskKind,
+    pub live_targets: Vec<LiveAimTarget>,
     pub hits: u32,
     pub last_hit: Option<bool>,
     pub last_yaw_deg: f64,
@@ -196,13 +213,15 @@ pub struct AimTrial {
     last_raw_timestamp_ns: Option<u64>,
     last_yaw_for_cam: f64,
     last_pitch_for_cam: f64,
-    rng_state: u64,
+    pub(crate) rng_state: u64,
 }
 
 impl Default for AimTrial {
     fn default() -> Self {
         Self {
             phase: AimPhase::Idle,
+            task_kind: AimTaskKind::StaticClick,
+            live_targets: Vec::new(),
             hits: 0,
             last_hit: None,
             last_yaw_deg: 0.0,
@@ -290,7 +309,7 @@ impl AimTrial {
         });
     }
 
-    fn clear_sample_logs(&mut self) {
+    pub(crate) fn clear_sample_logs(&mut self) {
         self.input_log.clear();
         self.camera_log.clear();
         self.input_seq = 0;
@@ -356,6 +375,8 @@ pub fn start_aim_trial(
     // rng_state = seed (reproducibility handle is random_seed; LCG state is runtime-only).
     trial.random_seed = random_seed;
     trial.rng_state = random_seed;
+    trial.task_kind = AimTaskKind::StaticClick;
+    trial.live_targets.clear();
     trial.phase = AimPhase::Armed;
     trial.hits = 0;
     trial.last_hit = None;
@@ -382,6 +403,7 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.last_hit = None;
         trial.current_target_id.clear();
         trial.next_target_ordinal = 1;
+        trial.live_targets.clear();
         trial.config_snapshot = None;
     }
     trial.phase = AimPhase::Idle;
@@ -433,12 +455,25 @@ pub fn build_completed_aim_trial_record(
         (end_timestamp_ns.saturating_sub(trial.start_timestamp_ns)) as f64 / 1e9;
     let score_secs = trial.score_secs.unwrap_or(duration_secs);
 
+    let (trial_type, task_version, task_config_json) = match trial.task_kind {
+        AimTaskKind::StaticClick => (
+            AIM_TRIAL_TYPE.to_string(),
+            STATIC_CLICK_TASK_VERSION.to_string(),
+            static_click_task_config_json(),
+        ),
+        AimTaskKind::Gridshot => (
+            crate::aim_gridshot::GRIDSHOT_TRIAL_TYPE.to_string(),
+            crate::aim_gridshot::GRIDSHOT_TASK_VERSION.to_string(),
+            crate::aim_gridshot::gridshot_task_config_json(),
+        ),
+    };
+
     AimTrialRecord {
         id: String::new(),
         app_version: AIM_APP_VERSION.into(),
         experiment_id: AIM_EXPERIMENT_ID.into(),
         experiment_version: AIM_EXPERIMENT_VERSION.into(),
-        trial_type: AIM_TRIAL_TYPE.into(),
+        trial_type,
         status: "completed".into(),
         processor_id: snap.processor_id.clone(),
         processor_version: snap.processor_version.clone(),
@@ -454,10 +489,10 @@ pub fn build_completed_aim_trial_record(
         resolution_height: snap.resolution_height,
         aspect_ratio: snap.aspect_ratio,
         random_seed: trial.random_seed,
-        task_version: STATIC_CLICK_TASK_VERSION.into(),
+        task_version,
         hardware_config_json: snap.hardware_config_json.clone(),
         view_config_json: snap.view_config_json.clone(),
-        task_config_json: static_click_task_config_json(),
+        task_config_json,
         metrics_json: "{}".into(),
         start_unix_ms: trial.start_unix_ms,
         end_unix_ms,

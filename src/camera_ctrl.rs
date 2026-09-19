@@ -3,9 +3,10 @@ use sense_accel::{create_processor, InputProcessor, RawAccelLinearConfig};
 use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
+    aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
     aim_trial::{
         aim_persist_status_from_insert, apply_aim_shot, left_button_down, on_look_disabled,
-        AimPhase, AimTrial,
+        AimPhase, AimTaskKind, AimTrial,
     },
     config::{ExperimentSettings, LookCapture, TelemetryBuffers, ValidationState},
     input_plugin::ArcMouseQueue,
@@ -127,6 +128,24 @@ pub fn drain_mouse_to_camera(
             accumulate_stats,
         );
         if aim.phase == AimPhase::Armed {
+            // GRIDSHOT: first timestamp with elapsed ≥ 60 ends before any gameplay on that sample.
+            if aim.task_kind == AimTaskKind::Gridshot
+                && gridshot_should_end(aim.start_timestamp_ns, sample.timestamp_ns)
+            {
+                if finish_gridshot_trial(&mut aim, sample.timestamp_ns) {
+                    let status = match unix_time_ms() {
+                        Ok(end_unix_ms) => persist_completed_aim_trial(
+                            &mut aim,
+                            end_unix_ms,
+                            sample.timestamp_ns,
+                        ),
+                        Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+                    };
+                    aim.last_persist = Some(status);
+                }
+                continue;
+            }
+
             let (dt_used_ns, input_speed, acceleration_scale) =
                 match active_processor.processor.last_linear_eval() {
                     Some(e) => (
@@ -150,7 +169,16 @@ pub fn drain_mouse_to_camera(
             aim.push_aim_camera_sample(sample.timestamp_ns, camera.yaw_deg, camera.pitch_deg);
 
             if left_button_down(sample.buttons) {
-                if apply_aim_shot(&mut aim, &camera, sample.timestamp_ns) {
+                let finished = match aim.task_kind {
+                    AimTaskKind::StaticClick => {
+                        apply_aim_shot(&mut aim, &camera, sample.timestamp_ns)
+                    }
+                    AimTaskKind::Gridshot => {
+                        let _ = apply_gridshot_shot(&mut aim, &camera, sample.timestamp_ns);
+                        false // timer owns Gridshot end / persist
+                    }
+                };
+                if finished {
                     let status = match unix_time_ms() {
                         Ok(end_unix_ms) => persist_completed_aim_trial(
                             &mut aim,
