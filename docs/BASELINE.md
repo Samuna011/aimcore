@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.8.0` (STATIC_CLICK full aim telemetry: five-table ML-ready model).
+**Experiment version:** `0.9.0` (GRIDSHOT v1 + STATIC_CLICK; five-table aim telemetry).
 
 ## Research progression (locked order)
 
@@ -69,9 +69,11 @@ M3.x Aim trial persistence        ← COMPLETE / STOPPED (exp 0.7.0)
  ↓
 M3.y Aim telemetry data model     ← COMPLETE / STOPPED (exp 0.8.0)
  ↓
+M4.a GRIDSHOT v1                  ← COMPLETE / STOPPED (exp 0.9.0)
+ ↓
 M4  Compare conditions
  ↓
 Longitudinal experiment
 ```
 
-Do not skip ahead.
+Do not skip ahead. **Stop** after GRIDSHOT v1 — do not add tracking / 1wall6 until a new task spec.

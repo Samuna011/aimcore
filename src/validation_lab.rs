@@ -4,8 +4,11 @@ use bevy_egui::{egui, EguiContexts};
 use sense_accel::CapMode;
 
 use crate::{
+    aim_gridshot::{
+        start_gridshot_trial, GRIDSHOT_CONCURRENT, GRIDSHOT_DURATION_SECS, GRIDSHOT_TRIAL_TYPE,
+    },
     aim_trial::{
-        cancel_aim_trial, start_aim_trial, AimPhase, AimRunConfigSnapshot, AimTrial,
+        cancel_aim_trial, start_aim_trial, AimPhase, AimRunConfigSnapshot, AimTaskKind, AimTrial,
         AIM_HITS_TO_FINISH,
     },
     camera_ctrl::{
@@ -205,15 +208,91 @@ pub fn draw_hud(
                     cancel_aim_trial(&mut aim);
                 }
             });
+            ui.separator();
+            ui.strong(format!("{GRIDSHOT_TRIAL_TYPE} (M4.a)"));
+            ui.small(
+                "60s timed run; 3 exclusive cells on a 3×3 wall; hit → immediate vacant respawn; miss unchanged. Score = hits / accuracy.",
+            );
+            ui.horizontal(|ui| {
+                let can_start_grid =
+                    !validation.is_running() && aim.phase == AimPhase::Idle;
+                if ui
+                    .add_enabled(can_start_grid, egui::Button::new("Start Gridshot"))
+                    .clicked()
+                {
+                    match unix_time_ms() {
+                        Ok(start_ms) => {
+                            let now = sense_input_win::monotonic_now_ns();
+                            let seed = now;
+                            let config = AimRunConfigSnapshot::from_live(
+                                &settings,
+                                active_processor.processor.id(),
+                                active_processor.processor.version(),
+                                &active_processor.processor.config_json(),
+                                window.physical_width(),
+                                window.physical_height(),
+                            );
+                            if start_gridshot_trial(
+                                &mut pose,
+                                &mut aim,
+                                *validation,
+                                now,
+                                start_ms,
+                                seed,
+                                config,
+                            )
+                            {
+                                session.status_message = Some(format!(
+                                    "Gridshot armed — {GRIDSHOT_DURATION_SECS:.0}s, {GRIDSHOT_CONCURRENT} live targets (LMB)."
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            session.status_message = Some(format!(
+                                "Gridshot start failed: wall clock unavailable ({error})"
+                            ));
+                        }
+                    }
+                }
+                if ui
+                    .add_enabled(
+                        aim.phase == AimPhase::Armed && aim.task_kind == AimTaskKind::Gridshot,
+                        egui::Button::new("Cancel Gridshot"),
+                    )
+                    .clicked()
+                {
+                    cancel_aim_trial(&mut aim);
+                }
+            });
             match aim.phase {
                 AimPhase::Armed => {
                     let elapsed = sense_input_win::monotonic_now_ns()
                         .saturating_sub(aim.start_timestamp_ns) as f64
                         / 1e9;
-                    ui.monospace(format!(
-                        "AIM: Armed  HITS: {}/{AIM_HITS_TO_FINISH}  ELAPSED: {elapsed:.3} s",
-                        aim.hits
-                    ));
+                    let shots = aim.shot_log.len() as u32;
+                    let accuracy = if shots == 0 {
+                        0.0
+                    } else {
+                        aim.hits as f64 / shots as f64
+                    };
+                    match aim.task_kind {
+                        AimTaskKind::StaticClick => {
+                            ui.monospace(format!(
+                                "AIM: Armed  HITS: {}/{AIM_HITS_TO_FINISH}  ELAPSED: {elapsed:.3} s",
+                                aim.hits
+                            ));
+                        }
+                        AimTaskKind::Gridshot => {
+                            let remaining =
+                                (GRIDSHOT_DURATION_SECS - elapsed).max(0.0);
+                            ui.monospace(format!(
+                                "GRIDSHOT: Armed  TIME LEFT: {remaining:.1} s  HITS: {}  SHOTS: {shots}  ACC: {:.1}%  LIVE: {}",
+                                aim.hits,
+                                accuracy * 100.0,
+                                aim.live_targets.len()
+                            ));
+                        }
+                    }
                     let proc_id = active_processor.processor.id();
                     let short_cfg = if proc_id == "none" {
                         "none".to_string()
@@ -232,10 +311,20 @@ pub fn draw_hud(
                     ui.monospace(format!("PROCESSOR: {short_cfg}"));
                 }
                 AimPhase::Idle => {
-                    ui.monospace(format!(
-                        "AIM: Idle  HITS: {}/{AIM_HITS_TO_FINISH}",
-                        aim.hits
-                    ));
+                    match aim.task_kind {
+                        AimTaskKind::StaticClick => {
+                            ui.monospace(format!(
+                                "AIM: Idle  HITS: {}/{AIM_HITS_TO_FINISH}",
+                                aim.hits
+                            ));
+                        }
+                        AimTaskKind::Gridshot => {
+                            ui.monospace(format!(
+                                "GRIDSHOT: Idle  HITS: {}  LIVE: 0",
+                                aim.hits
+                            ));
+                        }
+                    }
                     if let Some(secs) = aim.score_secs {
                         let shots = aim.shot_log.len() as u32;
                         let accuracy = if shots == 0 {
@@ -243,16 +332,21 @@ pub fn draw_hud(
                         } else {
                             aim.hits as f64 / shots as f64
                         };
-                        let duration = aim
-                            .last_timestamp_ns
-                            .saturating_sub(aim.start_timestamp_ns)
-                            as f64
-                            / 1e9;
-                        ui.strong(format!(
-                            "RUN SCORE: {secs:.3} s  ({AIM_HITS_TO_FINISH} hits)"
-                        ));
+                        match aim.task_kind {
+                            AimTaskKind::StaticClick => {
+                                ui.strong(format!(
+                                    "RUN SCORE: {secs:.3} s  ({AIM_HITS_TO_FINISH} hits)"
+                                ));
+                            }
+                            AimTaskKind::Gridshot => {
+                                ui.strong(format!(
+                                    "GRIDSHOT SCORE: {} hits in {secs:.3} s",
+                                    aim.hits
+                                ));
+                            }
+                        }
                         ui.monospace(format!(
-                            "DURATION: {duration:.3} s  ACCURACY: {}/{} ({:.1}%)",
+                            "DURATION: {secs:.3} s  ACCURACY: {}/{} ({:.1}%)",
                             aim.hits,
                             shots,
                             accuracy * 100.0
@@ -280,8 +374,12 @@ pub fn draw_hud(
                     ));
                 }
                 Some(false) => {
+                    let miss_note = match aim.task_kind {
+                        AimTaskKind::StaticClick => " — same target",
+                        AimTaskKind::Gridshot => " — targets unchanged",
+                    };
                     ui.monospace(format!(
-                        "LAST SHOT: MISS (yaw {:.3}, pitch {:.3}) — same target",
+                        "LAST SHOT: MISS (yaw {:.3}, pitch {:.3}){miss_note}",
                         aim.last_yaw_deg, aim.last_pitch_deg
                     ));
                 }

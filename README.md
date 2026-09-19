@@ -20,7 +20,9 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M3.x status:** COMPLETE / STOPPED. Completed STATIC_CLICK trials persist to SQLite (`aim_trials` + `aim_shots`); HUD shows score and `saved <trial_id>`. Aborts never insert. See [persistence design spec](docs/superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md).
 
-**M3.y status:** COMPLETE / STOPPED. Full reconstructable aim telemetry on completed STATIC_CLICK runs: five SQLite tables (`aim_trials`, `aim_target_events`, `aim_shots`, `aim_input_samples`, `aim_camera_samples`); deterministic `random_seed` at Start; raw `dt_ns` vs processor `dt_used_ns` on input samples. `experiment_version` **`0.8.0`**. See [telemetry data model spec](docs/superpowers/specs/2026-09-19-m3y-aim-telemetry-data-model-design.md). **Stop** — do not expand the telemetry layer further; next work requires a **task-specific spec** (Gridshot / 1wall6 / tracking).
+**M3.y status:** COMPLETE / STOPPED. Full reconstructable aim telemetry on completed STATIC_CLICK runs: five SQLite tables (`aim_trials`, `aim_target_events`, `aim_shots`, `aim_input_samples`, `aim_camera_samples`); deterministic `random_seed` at Start; raw `dt_ns` vs processor `dt_used_ns` on input samples. See [telemetry data model spec](docs/superpowers/specs/2026-09-19-m3y-aim-telemetry-data-model-design.md).
+
+**M4.a status:** COMPLETE / STOPPED. GRIDSHOT v1 (60s, 3 concurrent exclusive 3×3 cells, vacant-cell respawn) on the M3.y five-layer model; HUD Start Gridshot + time/hits/accuracy/live; multi-sphere render sync. `experiment_version` **`0.9.0`**. See [GRIDSHOT design spec](docs/superpowers/specs/2026-09-19-m4a-gridshot-design.md). **Stop** — do not add tracking / 1wall6 until a new task spec.
 
 ## Requirements
 
@@ -90,4 +92,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x aim trial persistence + M3.y full aim telemetry model complete — **STOPPED**. Next: task-specific spec, then M4 compare conditions.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + **M4.a GRIDSHOT v1** complete — **STOPPED** at exp `0.9.0`. Next: new task spec (tracking / 1wall6) or M4 compare conditions.

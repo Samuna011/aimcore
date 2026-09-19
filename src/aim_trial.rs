@@ -28,7 +28,7 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.8.0";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.9.0";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
 pub const STATIC_CLICK_TASK_VERSION: &str = "1";
 pub const PITCH_MODEL_ID: &str = "unverified_0.1";
@@ -59,6 +59,10 @@ pub fn format_target_id(ordinal: u32) -> String {
 
 #[derive(Component)]
 pub struct AimTarget;
+
+/// Index into the AimTarget render pool (0..GRIDSHOT_CONCURRENT).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AimTargetSlot(pub usize);
 
 #[derive(Component)]
 pub struct AimArena;
@@ -614,17 +618,22 @@ pub fn spawn_aim_target(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn((
-        AimTarget,
-        Mesh3d(meshes.add(Sphere::new(AIM_TARGET_RADIUS))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.15, 0.85, 0.35),
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_translation(AIM_CAMERA_ORIGIN + Vec3::NEG_Z * AIM_DISTANCE),
-        Visibility::Hidden,
-    ));
+    let mesh = meshes.add(Sphere::new(AIM_TARGET_RADIUS));
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.85, 0.35),
+        unlit: true,
+        ..default()
+    });
+    for slot in 0..crate::aim_gridshot::GRIDSHOT_CONCURRENT {
+        commands.spawn((
+            AimTarget,
+            AimTargetSlot(slot),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(AIM_CAMERA_ORIGIN + Vec3::NEG_Z * AIM_DISTANCE),
+            Visibility::Hidden,
+        ));
+    }
 }
 
 /// Translucent room + edge beams so depth/distance in the front cone are readable.
@@ -717,17 +726,31 @@ pub fn spawn_aim_arena(
 
 pub fn sync_aim_target(
     trial: Res<AimTrial>,
-    mut targets: Query<(&mut Visibility, &mut Transform), With<AimTarget>>,
+    mut targets: Query<(&AimTargetSlot, &mut Visibility, &mut Transform), With<AimTarget>>,
 ) {
-    let vis = if trial.phase == AimPhase::Armed {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    for (mut visibility, mut transform) in &mut targets {
-        *visibility = vis;
-        if trial.phase == AimPhase::Armed {
-            transform.translation = trial.current_center;
+    let armed = trial.phase == AimPhase::Armed;
+    for (slot, mut visibility, mut transform) in &mut targets {
+        if !armed {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        match trial.task_kind {
+            AimTaskKind::StaticClick => {
+                if slot.0 == 0 {
+                    *visibility = Visibility::Visible;
+                    transform.translation = trial.current_center;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+            AimTaskKind::Gridshot => {
+                if let Some(live) = trial.live_targets.get(slot.0) {
+                    *visibility = Visibility::Visible;
+                    transform.translation = live.center;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
         }
     }
 }
@@ -934,7 +957,7 @@ mod tests {
         let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.8.0");
+        assert_eq!(record.experiment_version, "0.9.0");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());

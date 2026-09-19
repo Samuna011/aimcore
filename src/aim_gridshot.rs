@@ -212,6 +212,67 @@ fn alloc_live_target(trial: &mut AimTrial, row: i32, col: i32) -> LiveAimTarget 
     }
 }
 
+/// Expanded radius for miss association (beyond true hit radius) so near-misses
+/// still pick a live sphere by closest positive ray approach.
+const MISS_ASSOCIATION_RADIUS: f64 = 2.0;
+
+/// Nearest live target for a miss shot: smallest positive `ray_sphere_hit_t` against
+/// [`MISS_ASSOCIATION_RADIUS`], else smallest angular error to center among live.
+pub fn nearest_live_target_for_miss<'a>(
+    live_targets: &'a [LiveAimTarget],
+    origin: [f64; 3],
+    dir: [f64; 3],
+) -> Option<&'a LiveAimTarget> {
+    if live_targets.is_empty() {
+        return None;
+    }
+
+    let mut best_t: Option<(usize, f64)> = None;
+    for (i, live) in live_targets.iter().enumerate() {
+        let center = [
+            live.center.x as f64,
+            live.center.y as f64,
+            live.center.z as f64,
+        ];
+        if let Some(t) =
+            sense_math::ray_sphere_hit_t(origin, dir, center, MISS_ASSOCIATION_RADIUS)
+        {
+            if best_t.map_or(true, |(_, bt)| t < bt) {
+                best_t = Some((i, t));
+            }
+        }
+    }
+    if let Some((i, _)) = best_t {
+        return Some(&live_targets[i]);
+    }
+
+    let dlen = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+    if dlen <= f64::EPSILON {
+        return live_targets.first();
+    }
+    let dx = dir[0] / dlen;
+    let dy = dir[1] / dlen;
+    let dz = dir[2] / dlen;
+
+    let mut best_cos: Option<(usize, f64)> = None;
+    for (i, live) in live_targets.iter().enumerate() {
+        let vx = live.center.x as f64 - origin[0];
+        let vy = live.center.y as f64 - origin[1];
+        let vz = live.center.z as f64 - origin[2];
+        let vlen = (vx * vx + vy * vy + vz * vz).sqrt();
+        if vlen <= f64::EPSILON {
+            continue;
+        }
+        let cos = (vx * dx + vy * dy + vz * dz) / vlen;
+        if best_cos.map_or(true, |(_, bc)| cos > bc) {
+            best_cos = Some((i, cos));
+        }
+    }
+    best_cos
+        .map(|(i, _)| &live_targets[i])
+        .or_else(|| live_targets.first())
+}
+
 pub fn start_gridshot_trial(
     pose: &mut YawPitch,
     trial: &mut AimTrial,
@@ -293,17 +354,27 @@ pub fn apply_gridshot_shot(
     trial.last_timestamp_ns = timestamp_ns;
 
     let Some((hit_idx, _)) = best else {
+        let nearest = nearest_live_target_for_miss(&trial.live_targets, origin, dir);
+        let (target_id, tx, ty, tz) = match nearest {
+            Some(live) => (
+                live.target_id.clone(),
+                live.center.x as f64,
+                live.center.y as f64,
+                live.center.z as f64,
+            ),
+            None => (String::new(), 0.0, 0.0, 0.0),
+        };
         trial.shot_log.push(sense_types::AimShotRecord {
             shot_index: trial.shot_log.len() as u32,
             timestamp_ns,
             hit: false,
             yaw_deg: pose.yaw_deg,
             pitch_deg: pose.pitch_deg,
-            target_x: 0.0,
-            target_y: 0.0,
-            target_z: 0.0,
+            target_x: tx,
+            target_y: ty,
+            target_z: tz,
             target_radius: AIM_TARGET_RADIUS as f64,
-            target_id: String::new(),
+            target_id,
         });
         trial.last_hit = Some(false);
         return GridshotShotResult::Miss;
@@ -634,6 +705,49 @@ mod tests {
         assert_eq!(trial.target_events.len(), events_before);
         assert_eq!(trial.shot_log.len(), 1);
         assert!(!trial.shot_log[0].hit);
+        assert!(!trial.shot_log[0].target_id.is_empty());
+        assert!(before.iter().any(|t| t.target_id == trial.shot_log[0].target_id));
+    }
+
+    #[test]
+    fn miss_stamps_nearest_live_target_id_and_center() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let now = 3_100_000_000u64;
+        assert!(start_gridshot_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            7,
+            test_config(),
+        ));
+        let intended = trial.live_targets[0].clone();
+        let (yaw, pitch) = yaw_pitch_looking_at(intended.center);
+        // ~3° off: misses R=0.25 but still hits expanded association radius.
+        pose.yaw_deg = yaw + 3.0;
+        pose.pitch_deg = pitch;
+        let origin = [
+            AIM_CAMERA_ORIGIN.x as f64,
+            AIM_CAMERA_ORIGIN.y as f64,
+            AIM_CAMERA_ORIGIN.z as f64,
+        ];
+        let dir = crate::aim_trial::look_direction_neg_z(pose.yaw_deg, pose.pitch_deg);
+        let expected = nearest_live_target_for_miss(&trial.live_targets, origin, dir)
+            .expect("live targets")
+            .clone();
+        assert_eq!(
+            apply_gridshot_shot(&mut trial, &pose, now + 1),
+            GridshotShotResult::Miss
+        );
+        let shot = &trial.shot_log[0];
+        assert!(!shot.hit);
+        assert_eq!(shot.target_id, expected.target_id);
+        assert!((shot.target_x - expected.center.x as f64).abs() < 1e-9);
+        assert!((shot.target_y - expected.center.y as f64).abs() < 1e-9);
+        assert!((shot.target_z - expected.center.z as f64).abs() < 1e-9);
+        assert!(!shot.target_id.is_empty());
     }
 
     #[test]
