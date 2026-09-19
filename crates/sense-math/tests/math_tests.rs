@@ -106,3 +106,39 @@ fn ray_sphere_miss_behind_camera() {
 fn ray_sphere_zero_dir_misses() {
     assert!(!ray_sphere_hit([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0));
 }
+
+#[test]
+fn ray_sphere_hit_t_through_center() {
+    let t = ray_sphere_hit_t([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 0.0, -5.0], 0.5)
+        .expect("expected hit");
+    assert!((t - 4.5).abs() < 1e-12);
+}
+
+#[test]
+fn ray_sphere_hit_t_miss_returns_none() {
+    assert!(ray_sphere_hit_t(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [2.0, 0.0, -5.0],
+        0.5
+    )
+    .is_none());
+    assert!(ray_sphere_hit_t(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, 5.0],
+        0.5
+    )
+    .is_none());
+    assert!(ray_sphere_hit_t([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0).is_none());
+}
+
+#[test]
+fn ray_sphere_hit_t_prefers_closer_sphere() {
+    // Two spheres along −Z; nearer at z=-3 (r=0.5 → t=2.5), farther at z=-8 (t=7.5).
+    let near = ray_sphere_hit_t([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 0.0, -3.0], 0.5).unwrap();
+    let far = ray_sphere_hit_t([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 0.0, -8.0], 0.5).unwrap();
+    assert!(near < far);
+    assert!((near - 2.5).abs() < 1e-12);
+    assert!((far - 7.5).abs() < 1e-12);
+}
