@@ -1,8 +1,9 @@
-# Telemetry Schema (M1 + M2 + M3.x)
+# Telemetry Schema (M1 + M2 + M3.x + M3.y)
 
-**Date:** 2026-09-18  
-**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.7.0`  
-**M3.x:** adds `aim_trials` / `aim_shots` for completed aim runs (`experiment_id` = `aim_lab`)
+**Date:** 2026-09-19  
+**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.8.0`  
+**M3.x:** adds `aim_trials` / `aim_shots` for completed aim runs (`experiment_id` = `aim_lab`)  
+**M3.y:** adds `aim_target_events`, `aim_input_samples`, `aim_camera_samples`; expands `aim_trials` snapshot; aim runs use `experiment_version` **`0.8.0`**
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -61,7 +62,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.7.0` for all new sessions, regardless of processor |
+| `experiment_version` | TEXT | `0.8.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -178,11 +179,202 @@ Integrity counters distinguish input pipeline faults from sensitivity model mism
 
 ---
 
-## M3.x Aim Tables
+## M3.y Aim Tables (five-table model)
 
-Schema created by `TelemetryDb::migrate()` alongside M1/M2 tables. **Completed trials only** — aborted or in-progress runs are never inserted.
+Schema created by `TelemetryDb::migrate()` alongside M1/M2 tables. **Completed trials only** — aborted, cancelled, or in-progress runs are never inserted.
+
+### Architecture
+
+```
+aim_trials                 ← immutable run snapshot (config + summary)
+ ├── aim_target_events     ← target lifecycle (spawn/despawn/…)
+ ├── aim_shots             ← player clicks (authoritative hit/miss)
+ ├── aim_input_samples     ← raw + processed input stream
+ └── aim_camera_samples    ← camera pose stream
+```
+
+All rows share one monotonic timing domain: `timestamp_ns` (QPC-backed). Reconstruct:
+
+```
+RAW INPUT → PROCESSOR → CAMERA → TARGET STATE → SHOT → HIT/MISS
+```
+
+**Lifecycle vs shots:** `aim_target_events` records what the target did (spawn, despawn, motion). `aim_shots` records what the player did (clicks). **`aim_shots.hit` owns click outcome** — do not store authoritative hit/miss on target events.
 
 ### `aim_trials`
+
+One row per **completed** aim trial. Immutable experiment/run snapshot: everything needed to reproduce or interpret the trial lives on the row or in its JSON fields.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `id` | TEXT PK | `aim_{utc_date}_{seq:06}` |
+| `app_version` | TEXT | binary version |
+| `experiment_id` | TEXT | `aim_lab` (distinct from `validation_lab`) |
+| `experiment_version` | TEXT | **`0.8.0`** |
+| `trial_type` | TEXT | e.g. `STATIC_CLICK` (task discriminator) |
+| `status` | TEXT | always `completed` for inserted rows |
+| `processor_id` | TEXT | snapshot at finish |
+| `processor_version` | TEXT | snapshot at finish |
+| `processor_config_json` | TEXT | full processor config (not merely id) |
+| `dpi` | REAL | counts/inch |
+| `sensitivity` | REAL | game sensitivity |
+| `polling_rate_hz` | REAL | Hz |
+| `fov_degrees_h` | REAL | horizontal FOV (degrees) |
+| `pitch_model_id` | TEXT | e.g. `unverified_0.1` |
+| `pitch_model_version` | TEXT | pitch model version |
+| `pitch_config_json` | TEXT | yaw/pitch constants, sign, clamp |
+| `resolution_width` | INTEGER | pixels at finish |
+| `resolution_height` | INTEGER | pixels at finish |
+| `aspect_ratio` | REAL | runtime width/height |
+| `random_seed` | INTEGER | reproducibility handle (u64), assigned at **Start** |
+| `task_version` | TEXT | bump when task/RNG semantics change |
+| `hardware_config_json` | TEXT | slower-moving env (mouse, display, …) |
+| `view_config_json` | TEXT | projection, VFOV, present mode, … |
+| `task_config_json` | TEXT | type-specific knobs incl. `rng`, `rng_version` |
+| `metrics_json` | TEXT | light extras (`{}` for STATIC_CLICK v1) |
+| `start_unix_ms` / `end_unix_ms` | INTEGER | wall clock (Unix ms) |
+| `start_timestamp_ns` / `end_timestamp_ns` | INTEGER | monotonic ns (score clock) |
+| `duration_secs` | REAL | seconds |
+| `hits` | INTEGER | successful hits |
+| `shots` | INTEGER | all clicks (hits + misses) |
+| `misses` | INTEGER | `shots - hits` |
+| `score_secs` | REAL | time to required hits (HUD score) |
+| `accuracy` | REAL | `hits / shots` |
+
+#### Seed semantics
+
+| Concept | Role |
+|---------|------|
+| `random_seed` | Persisted reproducibility handle, chosen at **Start** |
+| `rng` + `rng_version` in `task_config_json` | RNG implementation identity |
+| `task_version` | Bump when generation semantics change so same seed ≠ false equivalence |
+
+```
+random_seed + task_version + rng/rng_version + task_config
+  → deterministic target sequence
+```
+
+Internal LCG state is runtime-only — **not** the persisted reproducibility mechanism.
+
+Trial + all child rows insert in a **single transaction**; failure leaves no partial rows.
+
+### `aim_target_events`
+
+Target lifecycle stream, independent of player clicks.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `trial_id` | TEXT FK | → `aim_trials.id` |
+| `target_id` | TEXT | stable instance id: `target_001`, … |
+| `event_index` | INTEGER | 0-based order in trial stream |
+| `timestamp_ns` | INTEGER | monotonic |
+| `event_type` | TEXT | `spawn`, `despawn`, `direction_change`, `appear`, `disappear` |
+| `position_x/y/z` | REAL | world position |
+| `yaw_deg` / `pitch_deg` | REAL | target angles from camera (nullable) |
+| `velocity_x/y/z` | REAL | motion; `0` for STATIC_CLICK |
+| `event_data_json` | TEXT | extensible (e.g. `radius`) |
+
+Primary key: `(trial_id, event_index)`.
+
+**STATIC_CLICK v1 pattern:** per target instance → `spawn` → (miss shots have no target-event) → hit shot + `despawn`.
+
+### `aim_shots`
+
+Player clicks; owns authoritative hit/miss.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `trial_id` | TEXT FK | → `aim_trials.id` |
+| `shot_index` | INTEGER | 0-based order within trial |
+| `target_id` | TEXT | matches `aim_target_events.target_id` |
+| `timestamp_ns` | INTEGER | monotonic shot time |
+| `hit` | INTEGER | 0/1 — **authoritative** |
+| `yaw_deg` / `pitch_deg` | REAL | look at shot |
+| `target_x` / `target_y` / `target_z` | REAL | sphere center at click |
+| `target_radius` | REAL | radius used for hit test |
+
+Primary key: `(trial_id, shot_index)`.
+
+### `aim_input_samples`
+
+Lossless raw + processed input stream for the armed trial. Buffered in memory; flushed on completed write only.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `trial_id` | TEXT FK | → `aim_trials.id` |
+| `sequence_number` | INTEGER | per-trial monotonic |
+| `timestamp_ns` | INTEGER | **actual QPC** timestamp of raw sample |
+| `raw_dx` / `raw_dy` | INTEGER | WM_INPUT counts |
+| `processed_dx` / `processed_dy` | REAL | after `InputProcessor::process` |
+| `dt_ns` | INTEGER | **raw** QPC interval to previous sample (`timestamp_ns − prev`); first sample: `0` |
+| `dt_used_ns` | INTEGER | processor **effective** interval after speed-path floor/clamp |
+| `input_speed` | REAL | computed using **`dt_used_ns`** (nullable) |
+| `acceleration_scale` | REAL | Linear scale when available; `1.0` / NULL for `none` |
+
+Primary key: `(trial_id, sequence_number)`.
+
+#### `dt_ns` vs `dt_used_ns` (locked)
+
+```
+timestamp_ns  = actual QPC timestamp of the raw sample
+dt_ns         = raw QPC interval to previous raw sample
+dt_used_ns    = processor effective interval after polling-rate floor / clamp
+input_speed   = f(raw_dx, raw_dy, dt_used_ns)   // never use clamped value as dt_ns
+```
+
+**Do not** store the clamped interval in `dt_ns`. Raw timing stays permanent; processor behavior stays reproducible via `dt_used_ns` + frozen `processor_config_json` on `aim_trials`.
+
+For `rawaccel_linear`, `dt_used_ns` follows `sense-accel::clamp_speed_dt_ms`: clamp `dt_ns` between `1000/polling_rate_hz` (or RA default min) and RA max. If clamp formula changes, bump `processor_version` so old rows remain interpretable.
+
+Processor identity is **not** repeated per input row — frozen on `aim_trials`.
+
+### `aim_camera_samples`
+
+Camera pose after each input apply; separates processor output from camera mapping.
+
+| Column | Type | Unit / notes |
+|--------|------|--------------|
+| `trial_id` | TEXT FK | → `aim_trials.id` |
+| `timestamp_ns` | INTEGER | same monotonic domain |
+| `yaw_deg` / `pitch_deg` | REAL | absolute pose after apply |
+| `yaw_delta_deg` / `pitch_delta_deg` | REAL | delta from previous sample (`0` for first) |
+
+Primary key: `(trial_id, timestamp_ns)`.
+
+### Write rules (M3.y)
+
+1. **Armed:** buffer input, camera, target events, shots; assign `random_seed` at Start; deterministic spawns from seed.
+2. **Completed (Nth required hit):** single transaction inserting `aim_trials` + all child rows. All-or-nothing.
+3. **Abort / Cancel / Start Validation / quit while Armed:** discard buffers; **no** DB rows.
+4. Validation Lab session tables remain for 360° validation; aim runs use **aim_*** tables (no active validation session required).
+
+**Inspect after a run:**
+
+```bash
+sqlite3 data/sense_maxer.db "SELECT id, hits, shots, score_secs, accuracy, random_seed, status FROM aim_trials ORDER BY end_unix_ms;"
+sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_target_events WHERE trial_id='aim_YYYYMMDD_000001';"
+sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_shots WHERE trial_id='aim_YYYYMMDD_000001';"
+sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_input_samples WHERE trial_id='aim_YYYYMMDD_000001';"
+sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_camera_samples WHERE trial_id='aim_YYYYMMDD_000001';"
+sqlite3 data/sense_maxer.db "SELECT sequence_number, dt_ns, dt_used_ns FROM aim_input_samples WHERE trial_id='aim_YYYYMMDD_000001' LIMIT 5;"
+```
+
+Design: [2026-09-19-m3y-aim-telemetry-data-model-design.md](./superpowers/specs/2026-09-19-m3y-aim-telemetry-data-model-design.md). Predecessor: [2026-09-18-m3x-aim-trial-persistence-design.md](./superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md).
+
+---
+
+## M3.x Aim Tables (superseded by M3.y)
+
+M3.x introduced `aim_trials` + `aim_shots` only. M3.y extends the snapshot columns and adds three child streams. Existing `0.7.0` rows remain readable after migration; new completed trials write at **`0.8.0`** with full child streams.
+
+---
+
+## Legacy M3.x reference (pre-M3.y)
+
+<details>
+<summary>Original two-table M3.x documentation (historical)</summary>
+
+### `aim_trials` (M3.x)
 
 One row per **completed** aim trial. `trial_type` discriminates task kind (`STATIC_CLICK` now; future types reuse this table).
 
@@ -191,7 +383,7 @@ One row per **completed** aim trial. `trial_type` discriminates task kind (`STAT
 | `id` | TEXT PK | `aim_{utc_date}_{seq:06}` |
 | `app_version` | TEXT | binary version |
 | `experiment_id` | TEXT | `aim_lab` (distinct from `validation_lab`) |
-| `experiment_version` | TEXT | `0.7.0` |
+| `experiment_version` | TEXT | `0.7.0` (legacy rows) |
 | `trial_type` | TEXT | e.g. `STATIC_CLICK` |
 | `status` | TEXT | always `completed` for inserted rows |
 | `processor_id` | TEXT | snapshot at finish |
@@ -212,11 +404,9 @@ One row per **completed** aim trial. `trial_type` discriminates task kind (`STAT
 | `score_secs` | REAL | time to required hits (HUD score) |
 | `accuracy` | REAL | `hits / shots` |
 
-Trial + shots insert in a **single transaction**; failure leaves no partial rows.
+### `aim_shots` (M3.x)
 
-### `aim_shots`
-
-Optional per-click rows for click-style tasks. Skipped by trial types that do not use shots.
+Optional per-click rows for click-style tasks.
 
 | Column | Type | Unit / notes |
 |--------|------|--------------|
@@ -228,31 +418,23 @@ Optional per-click rows for click-style tasks. Skipped by trial types that do no
 | `target_x` / `target_y` / `target_z` | REAL | sphere center |
 | `target_radius` | REAL | radius used for hit test |
 
-Primary key: `(trial_id, shot_index)`.
-
-**Inspect after a run:**
-
-```bash
-sqlite3 data/sense_maxer.db "SELECT id, hits, shots, score_secs, accuracy, status FROM aim_trials ORDER BY end_unix_ms;"
-sqlite3 data/sense_maxer.db "SELECT COUNT(*) FROM aim_shots WHERE trial_id='aim_YYYYMMDD_000001';"
-```
-
-Design: [2026-09-18-m3x-aim-trial-persistence-design.md](./superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md).
+</details>
 
 ---
 
-## Future Tables (Post-M3.x)
+## Future Tables (Post-M3.y)
 
 Documented for later phases; **not implemented**:
 
 | Table | Purpose |
 |-------|---------|
 | `movements` | Segmented movement episodes |
-| `task_events` | Task lifecycle markers |
-| `performance_metrics` | Aggregated performance stats |
+| `performance_metrics` | Aggregated performance stats (compute offline from M3.y streams) |
 | `users` | Multi-user research |
 | `devices` | Hardware profiles |
 | `render_camera_samples` | Pose at render submit/present |
+
+Derived ML metrics (overshoot, jitter, path efficiency, RMS error, …) are **deferred** — recompute offline from trajectories + target geometry. M3.y stores lossless raw/event streams only.
 
 CSV/JSON export is also out of scope; data must be queryable via SQLite.
 

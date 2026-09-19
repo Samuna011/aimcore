@@ -18,7 +18,9 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **M3 status:** UnverifiedPitchModel enabled. Look mode applies yaw **and** pitch (same 0.07; +dy look down; ±89°; **UNCERTAIN**). STATIC_CLICK v1 (5-hit front-cone timed run). See [pitch design spec](docs/superpowers/specs/2026-09-17-unverified-pitch-model-design.md) and [research findings](docs/superpowers/specs/2026-09-17-valorant-pitch-research-findings.md).
 
-**M3.x status:** COMPLETE / STOPPED. Completed STATIC_CLICK trials persist to SQLite (`aim_trials` + `aim_shots`); HUD shows score and `saved <trial_id>`. Aborts never insert. `experiment_version` `0.7.0`. See [persistence design spec](docs/superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md). **No further M3 work** (no FLICK/TRACK) until a new spec.
+**M3.x status:** COMPLETE / STOPPED. Completed STATIC_CLICK trials persist to SQLite (`aim_trials` + `aim_shots`); HUD shows score and `saved <trial_id>`. Aborts never insert. See [persistence design spec](docs/superpowers/specs/2026-09-18-m3x-aim-trial-persistence-design.md).
+
+**M3.y status:** COMPLETE / STOPPED. Full reconstructable aim telemetry on completed STATIC_CLICK runs: five SQLite tables (`aim_trials`, `aim_target_events`, `aim_shots`, `aim_input_samples`, `aim_camera_samples`); deterministic `random_seed` at Start; raw `dt_ns` vs processor `dt_used_ns` on input samples. `experiment_version` **`0.8.0`**. See [telemetry data model spec](docs/superpowers/specs/2026-09-19-m3y-aim-telemetry-data-model-design.md). **Stop** — do not expand the telemetry layer further; next work requires a **task-specific spec** (Gridshot / 1wall6 / tracking).
 
 ## Requirements
 
@@ -88,4 +90,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x aim trial persistence complete — **STOPPED** (no FLICK/TRACK). Next: M4 compare conditions.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x aim trial persistence + M3.y full aim telemetry model complete — **STOPPED**. Next: task-specific spec, then M4 compare conditions.
