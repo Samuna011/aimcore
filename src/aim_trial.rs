@@ -113,7 +113,8 @@ pub fn aim_persist_status_from_insert(
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
     let accuracy = if trial.task_kind == AimTaskKind::Tracking {
-        let active_secs = active_elapsed_ns(trial, trial.last_timestamp_ns) as f64 / 1e9;
+        let active_secs = (active_elapsed_ns(trial, trial.last_timestamp_ns) as f64 / 1e9)
+            .min(crate::aim_tracking::TRACKING_DURATION_SECS);
         if active_secs <= f64::EPSILON {
             0.0
         } else {
@@ -221,6 +222,7 @@ pub struct AimTrial {
     pub lmb_held: bool,
     pub tracking_vx: f32,
     pub next_reverse_at_ns: Option<u64>,
+    pub last_tracking_tick_ns: Option<u64>,
     pub shot_log: Vec<AimShotRecord>,
     pub target_events: Vec<AimTargetEventRecord>,
     pub input_log: Vec<AimInputSampleRecord>,
@@ -259,6 +261,7 @@ impl Default for AimTrial {
             lmb_held: false,
             tracking_vx: 0.0,
             next_reverse_at_ns: None,
+            last_tracking_tick_ns: None,
             shot_log: Vec::new(),
             target_events: Vec::new(),
             input_log: Vec::new(),
@@ -405,6 +408,9 @@ pub fn begin_aim_pause(trial: &mut AimTrial, now_ns: u64) {
         return;
     }
     trial.paused_at_qpc = Some(now_ns);
+    if trial.task_kind == AimTaskKind::Tracking {
+        crate::aim_tracking::push_tracking_direction_event(trial, now_ns, 0.0);
+    }
 }
 
 pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
@@ -415,6 +421,8 @@ pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
             trial.next_reverse_at_ns = trial
                 .next_reverse_at_ns
                 .map(|scheduled| scheduled.saturating_add(pause_ns));
+            trial.last_tracking_tick_ns = Some(now_ns);
+            crate::aim_tracking::push_tracking_direction_event(trial, now_ns, trial.tracking_vx);
         }
         // The first post-resume sample starts a fresh input interval; otherwise
         // its raw dt includes the entire pause.
@@ -449,6 +457,7 @@ pub fn start_aim_trial(
     trial.lmb_held = false;
     trial.tracking_vx = 0.0;
     trial.next_reverse_at_ns = None;
+    trial.last_tracking_tick_ns = None;
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -474,6 +483,7 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.lmb_held = false;
         trial.tracking_vx = 0.0;
         trial.next_reverse_at_ns = None;
+        trial.last_tracking_tick_ns = None;
         trial.last_hit = None;
         trial.current_target_id.clear();
         trial.next_target_ordinal = 1;
@@ -513,12 +523,13 @@ pub fn build_completed_aim_trial_record(
     let active_secs = active_elapsed_ns(trial, end_timestamp_ns) as f64 / 1e9;
     let score_secs = trial.score_secs.unwrap_or(active_secs);
     let (duration_secs, accuracy) = if trial.task_kind == AimTaskKind::Tracking {
+        let active_duration = active_secs.min(crate::aim_tracking::TRACKING_DURATION_SECS);
         (
-            active_secs,
-            if active_secs <= f64::EPSILON {
+            active_duration,
+            if active_duration <= f64::EPSILON {
                 0.0
             } else {
-                (score_secs / active_secs).clamp(0.0, 1.0)
+                (score_secs / active_duration).clamp(0.0, 1.0)
             },
         )
     } else {

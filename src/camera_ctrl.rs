@@ -5,8 +5,8 @@ use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 use crate::{
     aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
     aim_tracking::{
-        finish_tracking_trial, sync_tracking_lmb_during_pause, tick_tracking_sample,
-        tracking_should_end,
+        sync_tracking_lmb_during_pause, sync_tracking_lmb_from_sample, tick_tracking_frame_logic,
+        TrackingTickResult,
     },
     aim_trial::{
         aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTaskKind,
@@ -157,35 +157,8 @@ pub fn drain_mouse_to_camera(
                 }
                 continue;
             }
-            // TRACKING uses the same timer-owned completion ordering: finish before
-            // motion, score, or telemetry buffering on the terminal sample.
-            if aim.task_kind == AimTaskKind::Tracking
-                && tracking_should_end(&aim, sample.timestamp_ns)
-            {
-                if finish_tracking_trial(&mut aim, sample.timestamp_ns) {
-                    let status = match unix_time_ms() {
-                        Ok(end_unix_ms) => {
-                            persist_completed_aim_trial(&mut aim, end_unix_ms, sample.timestamp_ns)
-                        }
-                        Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
-                    };
-                    aim.last_persist = Some(status);
-                    finish_trial_ui(&mut ui, &aim);
-                    look.enabled = false;
-                    break;
-                }
-                continue;
-            }
-
-            let raw_dt_ns = aim.next_input_dt_ns(sample.timestamp_ns);
             if aim.task_kind == AimTaskKind::Tracking {
-                let _ = tick_tracking_sample(
-                    &mut aim,
-                    &camera,
-                    sample.timestamp_ns,
-                    raw_dt_ns,
-                    sample.buttons,
-                );
+                sync_tracking_lmb_from_sample(&mut aim, sample.buttons);
             }
             let (dt_used_ns, input_speed, acceleration_scale) =
                 match active_processor.processor.last_linear_eval() {
@@ -248,6 +221,34 @@ pub fn drain_mouse_to_camera(
             buffers.0.input_camera.push(camera_sample);
         }
     }
+}
+
+pub fn tick_tracking_frame(
+    camera: Single<&YawPitch, With<Camera3d>>,
+    mut aim: ResMut<AimTrial>,
+    mut ui: ResMut<LabUi>,
+    mut look: ResMut<LookCapture>,
+) {
+    if ui.screen != LabScreen::Playing
+        || aim.phase != AimPhase::Armed
+        || aim.task_kind != AimTaskKind::Tracking
+        || aim.paused_at_qpc.is_some()
+    {
+        return;
+    }
+
+    let now_ns = sense_input_win::monotonic_now_ns();
+    if tick_tracking_frame_logic(&mut aim, &camera, now_ns) != TrackingTickResult::Finished {
+        return;
+    }
+
+    let status = match unix_time_ms() {
+        Ok(end_unix_ms) => persist_completed_aim_trial(&mut aim, end_unix_ms, now_ns),
+        Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+    };
+    aim.last_persist = Some(status);
+    finish_trial_ui(&mut ui, &aim);
+    look.enabled = false;
 }
 
 pub fn apply_yaw_transform(camera: Single<(&YawPitch, &mut Transform), With<Camera3d>>) {

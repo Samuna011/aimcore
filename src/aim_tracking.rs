@@ -26,7 +26,7 @@ pub const TRACKING_TASK_VERSION: &str = "1";
 /// Same LCG as STATIC_CLICK / GRIDSHOT: Mulberry-style advance, unit in [0, 1).
 fn next_unit(rng: &mut u64) -> f64 {
     *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-    ((*rng >> 33) as f64) / (u32::MAX as f64 + 1.0)
+    ((*rng >> 33) as f64) / ((1u64 << 31) as f64)
 }
 
 pub fn tracking_task_config_json() -> String {
@@ -135,6 +135,14 @@ fn push_tracking_event(trial: &mut AimTrial, timestamp_ns: u64, event_type: &str
     });
 }
 
+pub(crate) fn push_tracking_direction_event(
+    trial: &mut AimTrial,
+    timestamp_ns: u64,
+    velocity_x: f32,
+) {
+    push_tracking_event(trial, timestamp_ns, "direction_change", velocity_x);
+}
+
 pub fn start_tracking_trial(
     pose: &mut YawPitch,
     trial: &mut AimTrial,
@@ -166,6 +174,7 @@ pub fn start_tracking_trial(
         -TRACKING_SPEED
     };
     trial.next_reverse_at_ns = None;
+    trial.last_tracking_tick_ns = Some(now_ns);
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -200,26 +209,34 @@ pub fn sync_tracking_lmb_during_pause(trial: &mut AimTrial, buttons: u32) -> boo
     }
 }
 
-pub fn tick_tracking_sample(
+pub fn sync_tracking_lmb_from_sample(trial: &mut AimTrial, buttons: u32) {
+    if trial.phase != AimPhase::Armed || trial.task_kind != AimTaskKind::Tracking {
+        return;
+    }
+    update_lmb_held(&mut trial.lmb_held, buttons);
+}
+
+pub fn tick_tracking_frame_logic(
     trial: &mut AimTrial,
     pose: &YawPitch,
-    sample_timestamp_ns: u64,
-    dt_ns: u64,
-    buttons: u32,
+    now_ns: u64,
 ) -> TrackingTickResult {
     if trial.phase != AimPhase::Armed || trial.task_kind != AimTaskKind::Tracking {
         return TrackingTickResult::Finished;
     }
     if trial.paused_at_qpc.is_some() {
-        update_lmb_held(&mut trial.lmb_held, buttons);
         return TrackingTickResult::Continue;
     }
-    if tracking_should_end(trial, sample_timestamp_ns) {
-        finish_tracking_trial(trial, sample_timestamp_ns);
-        return TrackingTickResult::Finished;
-    }
 
-    update_lmb_held(&mut trial.lmb_held, buttons);
+    let previous_tick_ns = trial
+        .last_tracking_tick_ns
+        .replace(now_ns)
+        .unwrap_or(now_ns);
+    let raw_dt_ns = now_ns.saturating_sub(previous_tick_ns);
+    let duration_ns = delay_ns(TRACKING_DURATION_SECS);
+    let previous_active_ns = active_elapsed_ns(trial, previous_tick_ns);
+    let dt_ns = raw_dt_ns.min(duration_ns.saturating_sub(previous_active_ns));
+
     let (x, vx, wall_bounced) = step_strafe(
         trial.current_center.x,
         trial.tracking_vx,
@@ -230,20 +247,13 @@ pub fn tick_tracking_sample(
     trial.current_center.x = x;
     trial.tracking_vx = vx;
 
-    let scheduled_reverse = trial
-        .next_reverse_at_ns
-        .is_some_and(|at| sample_timestamp_ns >= at);
+    let scheduled_reverse = trial.next_reverse_at_ns.is_some_and(|at| now_ns >= at);
     if scheduled_reverse && !wall_bounced {
         trial.tracking_vx = reverse_vx(trial.tracking_vx);
     }
     if wall_bounced || scheduled_reverse {
-        push_tracking_event(
-            trial,
-            sample_timestamp_ns,
-            "direction_change",
-            trial.tracking_vx,
-        );
-        schedule_next_reverse(trial, sample_timestamp_ns);
+        push_tracking_event(trial, now_ns, "direction_change", trial.tracking_vx);
+        schedule_next_reverse(trial, now_ns);
     }
 
     let origin = [
@@ -264,6 +274,11 @@ pub fn tick_tracking_sample(
         TRACKING_RADIUS as f64,
         dt_ns,
     ));
+
+    if tracking_should_end(trial, now_ns) {
+        finish_tracking_trial(trial, now_ns);
+        return TrackingTickResult::Finished;
+    }
     TrackingTickResult::Continue
 }
 
@@ -276,6 +291,7 @@ pub fn finish_tracking_trial(trial: &mut AimTrial, end_ns: u64) -> bool {
     push_tracking_event(trial, end_ns, "despawn", 0.0);
     trial.lmb_held = false;
     trial.next_reverse_at_ns = None;
+    trial.last_tracking_tick_ns = None;
     trial.phase = AimPhase::Idle;
     true
 }
@@ -286,8 +302,8 @@ mod tests {
     use crate::{
         aim_trial::{
             aim_persist_status_from_insert, begin_aim_pause, build_completed_aim_trial_record,
-            end_aim_pause, AimRunConfigSnapshot, AimTaskKind, AimTrial,
-            RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP,
+            end_aim_pause, AimRunConfigSnapshot, AimTaskKind, AimTrial, RI_MOUSE_LEFT_BUTTON_DOWN,
+            RI_MOUSE_LEFT_BUTTON_UP,
         },
         camera_ctrl::YawPitch,
         config::{ExperimentSettings, ValidationState},
@@ -345,6 +361,7 @@ mod tests {
     #[test]
     fn next_reverse_delay_in_range() {
         let mut rng = 42u64;
+        let mut saw_above_half_range = false;
         for _ in 0..100 {
             let d = next_reverse_delay_s(
                 &mut rng,
@@ -353,7 +370,12 @@ mod tests {
             );
             assert!(d >= TRACKING_REVERSE_DELAY_MIN_S);
             assert!(d < TRACKING_REVERSE_DELAY_MAX_S);
+            saw_above_half_range |= d > 2.5;
         }
+        assert!(
+            saw_above_half_range,
+            "LCG must cover the upper half of the delay range"
+        );
     }
 
     #[test]
@@ -474,21 +496,25 @@ mod tests {
         ));
 
         trial.tracking_vx = 0.0;
+        sync_tracking_lmb_from_sample(&mut trial, 0);
         assert_eq!(
-            tick_tracking_sample(&mut trial, &pose, start + 10, 10, 0),
+            tick_tracking_frame_logic(&mut trial, &pose, start + 10),
             TrackingTickResult::Continue
         );
         assert_eq!(trial.time_on_target_ns, 0);
 
-        tick_tracking_sample(&mut trial, &pose, start + 20, 10, RI_MOUSE_LEFT_BUTTON_DOWN);
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_DOWN);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 20);
         assert_eq!(trial.time_on_target_ns, 10);
 
         pose.yaw_deg = 90.0;
-        tick_tracking_sample(&mut trial, &pose, start + 30, 10, 0);
+        sync_tracking_lmb_from_sample(&mut trial, 0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 30);
         assert_eq!(trial.time_on_target_ns, 10);
 
         pose.yaw_deg = 0.0;
-        tick_tracking_sample(&mut trial, &pose, start + 40, 10, RI_MOUSE_LEFT_BUTTON_UP);
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_UP);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 40);
         assert_eq!(trial.time_on_target_ns, 10);
         assert!(trial.shot_log.is_empty());
     }
@@ -518,12 +544,12 @@ mod tests {
         ));
         assert!(!trial.lmb_held);
 
-        tick_tracking_sample(&mut trial, &pose, start + 5_000_000_100, 5_000_000_000, 0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 5_000_000_100);
         assert_eq!(trial.time_on_target_ns, score);
 
         end_aim_pause(&mut trial, start + 5_000_000_100);
         assert!(!trial.lmb_held);
-        tick_tracking_sample(&mut trial, &pose, start + 5_000_000_200, 100, 0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 5_000_000_200);
         assert_eq!(trial.time_on_target_ns, score);
     }
 
@@ -547,12 +573,43 @@ mod tests {
         let reverse_at = trial.next_reverse_at_ns.expect("reverse schedule");
 
         begin_aim_pause(&mut trial, start + 100);
-        tick_tracking_sample(&mut trial, &pose, start + 5_000_000_100, 5_000_000_000, 0);
+        let pause_event = trial.target_events.last().expect("pause direction change");
+        assert_eq!(pause_event.event_type, "direction_change");
+        assert_eq!(pause_event.timestamp_ns, start + 100);
+        assert_eq!(pause_event.velocity_x, 0.0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 5_000_000_100);
         assert_eq!(trial.current_center.x, x);
         assert_eq!(trial.time_on_target_ns, score);
 
         end_aim_pause(&mut trial, start + 5_000_000_100);
+        let resume_event = trial.target_events.last().expect("resume direction change");
+        assert_eq!(resume_event.event_type, "direction_change");
+        assert_eq!(resume_event.timestamp_ns, start + 5_000_000_100);
+        assert_eq!(resume_event.velocity_x, trial.tracking_vx as f64);
         assert_eq!(trial.next_reverse_at_ns, Some(reverse_at + 5_000_000_000));
+    }
+
+    #[test]
+    fn frame_tick_finishes_tracking_without_mouse_samples() {
+        let start = 8_000_000_000;
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        assert!(start_tracking_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            17,
+            test_config(),
+        ));
+
+        assert_eq!(
+            tick_tracking_frame_logic(&mut trial, &pose, start + 30_000_000_000),
+            TrackingTickResult::Finished
+        );
+        assert_eq!(trial.phase, AimPhase::Idle);
+        assert!(trial.input_log.is_empty());
     }
 
     #[test]
@@ -574,12 +631,12 @@ mod tests {
         trial.current_center.x = TRACKING_X_MAX - 0.01;
         trial.tracking_vx = TRACKING_SPEED;
         trial.next_reverse_at_ns = Some(start + 10_000_000_000);
-        tick_tracking_sample(&mut trial, &pose, start + 20_000_000, 20_000_000, 0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 20_000_000);
         assert_eq!(trial.target_events[1].event_type, "direction_change");
         assert!(trial.tracking_vx < 0.0);
 
         trial.next_reverse_at_ns = Some(start + 30_000_000);
-        tick_tracking_sample(&mut trial, &pose, start + 30_000_000, 1, 0);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 30_000_000);
         assert_eq!(trial.target_events[2].event_type, "direction_change");
         assert!(trial.tracking_vx > 0.0);
     }
@@ -621,11 +678,11 @@ mod tests {
         assert_eq!(record.hits, 0);
         assert_eq!(record.shots, 0);
         assert_eq!(record.misses, 0);
-        assert_eq!(record.duration_secs, 30.5);
+        assert_eq!(record.duration_secs, TRACKING_DURATION_SECS);
         assert_eq!(record.score_secs, 12.0);
-        assert!((record.accuracy - 12.0 / 30.5).abs() < 1e-12);
+        assert!((record.accuracy - 12.0 / TRACKING_DURATION_SECS).abs() < 1e-12);
 
         let status = aim_persist_status_from_insert(&trial, Ok("tracking_test".into()));
-        assert!((status.accuracy - 12.0 / 30.5).abs() < 1e-12);
+        assert!((status.accuracy - 12.0 / TRACKING_DURATION_SECS).abs() < 1e-12);
     }
 }
