@@ -186,6 +186,20 @@ pub fn tracking_should_end(trial: &AimTrial, now_ns: u64) -> bool {
     active_elapsed_ns(trial, now_ns) as f64 / 1e9 >= TRACKING_DURATION_SECS
 }
 
+/// While Armed+Tracking is paused, input drain still syncs LMB held state without
+/// motion, scoring, or camera apply (see `drain_mouse_to_camera`).
+pub fn sync_tracking_lmb_during_pause(trial: &mut AimTrial, buttons: u32) -> bool {
+    if trial.phase == AimPhase::Armed
+        && trial.task_kind == AimTaskKind::Tracking
+        && trial.paused_at_qpc.is_some()
+    {
+        update_lmb_held(&mut trial.lmb_held, buttons);
+        true
+    } else {
+        false
+    }
+}
+
 pub fn tick_tracking_sample(
     trial: &mut AimTrial,
     pose: &YawPitch,
@@ -197,6 +211,7 @@ pub fn tick_tracking_sample(
         return TrackingTickResult::Finished;
     }
     if trial.paused_at_qpc.is_some() {
+        update_lmb_held(&mut trial.lmb_held, buttons);
         return TrackingTickResult::Continue;
     }
     if tracking_should_end(trial, sample_timestamp_ns) {
@@ -476,6 +491,40 @@ mod tests {
         tick_tracking_sample(&mut trial, &pose, start + 40, 10, RI_MOUSE_LEFT_BUTTON_UP);
         assert_eq!(trial.time_on_target_ns, 10);
         assert!(trial.shot_log.is_empty());
+    }
+
+    #[test]
+    fn tracking_pause_syncs_lmb_release_without_scoring() {
+        let start = 5_000_000_000;
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        assert!(start_tracking_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            13,
+            test_config(),
+        ));
+        trial.lmb_held = true;
+        trial.tracking_vx = 0.0;
+        let score = trial.time_on_target_ns;
+
+        begin_aim_pause(&mut trial, start + 100);
+        assert!(sync_tracking_lmb_during_pause(
+            &mut trial,
+            RI_MOUSE_LEFT_BUTTON_UP
+        ));
+        assert!(!trial.lmb_held);
+
+        tick_tracking_sample(&mut trial, &pose, start + 5_000_000_100, 5_000_000_000, 0);
+        assert_eq!(trial.time_on_target_ns, score);
+
+        end_aim_pause(&mut trial, start + 5_000_000_100);
+        assert!(!trial.lmb_held);
+        tick_tracking_sample(&mut trial, &pose, start + 5_000_000_200, 100, 0);
+        assert_eq!(trial.time_on_target_ns, score);
     }
 
     #[test]

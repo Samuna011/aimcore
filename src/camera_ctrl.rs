@@ -4,7 +4,10 @@ use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
     aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
-    aim_tracking::{finish_tracking_trial, tick_tracking_sample, tracking_should_end},
+    aim_tracking::{
+        finish_tracking_trial, sync_tracking_lmb_during_pause, tick_tracking_sample,
+        tracking_should_end,
+    },
     aim_trial::{
         aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTaskKind,
         AimTrial,
@@ -88,8 +91,13 @@ pub fn drain_mouse_to_camera(
 ) {
     let samples = queue.0.drain_all();
     live.samples_this_frame = 0;
-    // Paused/lobby input is intentionally discarded without aborting the trial.
-    if !look.enabled || !screen_accepts_mouse(ui.screen) {
+    let accept_gameplay = look.enabled && screen_accepts_mouse(ui.screen);
+    // Paused/lobby input is intentionally discarded without aborting the trial,
+    // except TRACKING still syncs LMB held so release-during-pause is not lost.
+    if !accept_gameplay {
+        for sample in samples {
+            sync_tracking_lmb_during_pause(&mut aim, sample.buttons);
+        }
         return;
     }
     let accumulate_stats = validation.is_running();
