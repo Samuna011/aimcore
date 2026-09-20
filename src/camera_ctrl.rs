@@ -4,6 +4,7 @@ use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
     aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
+    aim_tracking::{finish_tracking_trial, tick_tracking_sample, tracking_should_end},
     aim_trial::{
         aim_persist_status_from_insert, apply_aim_shot, left_button_down, AimPhase, AimTaskKind,
         AimTrial,
@@ -148,7 +149,36 @@ pub fn drain_mouse_to_camera(
                 }
                 continue;
             }
+            // TRACKING uses the same timer-owned completion ordering: finish before
+            // motion, score, or telemetry buffering on the terminal sample.
+            if aim.task_kind == AimTaskKind::Tracking
+                && tracking_should_end(&aim, sample.timestamp_ns)
+            {
+                if finish_tracking_trial(&mut aim, sample.timestamp_ns) {
+                    let status = match unix_time_ms() {
+                        Ok(end_unix_ms) => {
+                            persist_completed_aim_trial(&mut aim, end_unix_ms, sample.timestamp_ns)
+                        }
+                        Err(error) => aim_persist_status_from_insert(&aim, Err(error)),
+                    };
+                    aim.last_persist = Some(status);
+                    finish_trial_ui(&mut ui, &aim);
+                    look.enabled = false;
+                    break;
+                }
+                continue;
+            }
 
+            let raw_dt_ns = aim.next_input_dt_ns(sample.timestamp_ns);
+            if aim.task_kind == AimTaskKind::Tracking {
+                let _ = tick_tracking_sample(
+                    &mut aim,
+                    &camera,
+                    sample.timestamp_ns,
+                    raw_dt_ns,
+                    sample.buttons,
+                );
+            }
             let (dt_used_ns, input_speed, acceleration_scale) =
                 match active_processor.processor.last_linear_eval() {
                     Some(e) => (
@@ -180,6 +210,7 @@ pub fn drain_mouse_to_camera(
                         let _ = apply_gridshot_shot(&mut aim, &camera, sample.timestamp_ns);
                         false // timer owns Gridshot end / persist
                     }
+                    AimTaskKind::Tracking => false,
                 };
                 if finished {
                     let status = match unix_time_ms() {

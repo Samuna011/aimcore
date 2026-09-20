@@ -120,6 +120,7 @@ pub fn finish_trial_ui(ui: &mut LabUi, aim: &AimTrial) {
         task_label: match aim.task_kind {
             AimTaskKind::StaticClick => "Static Click",
             AimTaskKind::Gridshot => "Gridshot",
+            AimTaskKind::Tracking => "Tracking",
         }
         .into(),
         hits: persist.hits,

@@ -7,6 +7,7 @@ use sense_accel::CapMode;
 use crate::{
     aim_gridshot::{start_gridshot_trial, GRIDSHOT_CONCURRENT, GRIDSHOT_DURATION_SECS},
     aim_replay::{live_targets_at, AimReplay},
+    aim_tracking::{start_tracking_trial, TRACKING_DURATION_SECS},
     aim_trial::{
         active_elapsed_ns, cancel_aim_trial, end_aim_pause, start_aim_trial, AimPhase,
         AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_EXPERIMENT_VERSION, AIM_HITS_TO_FINISH,
@@ -506,6 +507,7 @@ fn draw_pause_home(
     ui.label(match aim.task_kind {
         AimTaskKind::StaticClick => "Static Click is paused.",
         AimTaskKind::Gridshot => "Gridshot is paused.",
+        AimTaskKind::Tracking => "Tracking is paused.",
     });
     if ui.button("Resume").clicked() {
         *action = Some(HudAction::Resume);
@@ -756,6 +758,20 @@ fn draw_playing_hud(
                     accuracy * 100.0,
                     (GRIDSHOT_DURATION_SECS - elapsed).max(0.0),
                 ),
+                AimTaskKind::Tracking => {
+                    let score = aim.time_on_target_ns as f64 / 1e9;
+                    let tracking_accuracy = if elapsed <= f64::EPSILON {
+                        0.0
+                    } else {
+                        score / elapsed
+                    };
+                    format!(
+                        "TRACKING · {:.2}s · {:.1}% · {:.1}s",
+                        score,
+                        tracking_accuracy * 100.0,
+                        (TRACKING_DURATION_SECS - elapsed).max(0.0),
+                    )
+                }
             };
             ui.monospace(line);
         });
@@ -868,6 +884,9 @@ fn start_selected_trial(
         AimTaskKind::Gridshot => {
             start_gridshot_trial(pose, aim, validation, now, start_ms, now, config)
         }
+        AimTaskKind::Tracking => {
+            start_tracking_trial(pose, aim, validation, now, start_ms, now, config)
+        }
     };
     enter_playing_after_start(lab_ui, started);
     if started {
@@ -878,6 +897,9 @@ fn start_selected_trial(
             AimTaskKind::Gridshot => format!(
                 "Gridshot armed — {GRIDSHOT_DURATION_SECS:.0}s, {GRIDSHOT_CONCURRENT} live targets."
             ),
+            AimTaskKind::Tracking => {
+                format!("Tracking armed — hold LMB on target for {TRACKING_DURATION_SECS:.0}s.")
+            }
         });
     }
     started

@@ -33,9 +33,7 @@ pub const GRIDSHOT_CELLS: [(i32, i32); 9] = [
 
 /// Same LCG as STATIC_CLICK (`aim_trial`): Mulberry-style advance, unit in [0,1).
 fn next_unit(rng: &mut u64) -> f64 {
-    *rng = rng
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1);
+    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
     ((*rng >> 33) as f64) / (u32::MAX as f64 + 1.0)
 }
 
@@ -147,10 +145,7 @@ fn push_gridshot_despawn(trial: &mut AimTrial, live: &LiveAimTarget, timestamp_n
         velocity_x: 0.0,
         velocity_y: 0.0,
         velocity_z: 0.0,
-        event_data_json: format!(
-            r#"{{"cell_row":{},"cell_col":{}}}"#,
-            live.row, live.col
-        ),
+        event_data_json: format!(r#"{{"cell_row":{},"cell_col":{}}}"#, live.row, live.col),
     });
 }
 
@@ -187,8 +182,7 @@ pub fn nearest_live_target_for_miss<'a>(
             live.center.y as f64,
             live.center.z as f64,
         ];
-        if let Some(t) =
-            sense_math::ray_sphere_hit_t(origin, dir, center, MISS_ASSOCIATION_RADIUS)
+        if let Some(t) = sense_math::ray_sphere_hit_t(origin, dir, center, MISS_ASSOCIATION_RADIUS)
         {
             if best_t.map_or(true, |(_, bt)| t < bt) {
                 best_t = Some((i, t));
@@ -248,6 +242,10 @@ pub fn start_gridshot_trial(
     trial.hits = 0;
     trial.last_hit = None;
     trial.score_secs = None;
+    trial.time_on_target_ns = 0;
+    trial.lmb_held = false;
+    trial.tracking_vx = 0.0;
+    trial.next_reverse_at_ns = None;
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -295,8 +293,7 @@ pub fn apply_gridshot_shot(
             live.center.y as f64,
             live.center.z as f64,
         ];
-        if let Some(t) =
-            sense_math::ray_sphere_hit_t(origin, dir, center, AIM_TARGET_RADIUS as f64)
+        if let Some(t) = sense_math::ray_sphere_hit_t(origin, dir, center, AIM_TARGET_RADIUS as f64)
         {
             if best.map_or(true, |(_, bt)| t < bt) {
                 best = Some((i, t));
@@ -355,11 +352,7 @@ pub fn apply_gridshot_shot(
     push_gridshot_despawn(trial, &victim, timestamp_ns);
     trial.live_targets.remove(hit_idx);
 
-    let occupied: Vec<(i32, i32)> = trial
-        .live_targets
-        .iter()
-        .map(|t| (t.row, t.col))
-        .collect();
+    let occupied: Vec<(i32, i32)> = trial.live_targets.iter().map(|t| (t.row, t.col)).collect();
     let (row, col) = pick_vacant_cell(
         &mut trial.rng_state,
         &occupied,
@@ -390,7 +383,7 @@ mod tests {
     use super::*;
     use crate::aim_trial::{
         build_completed_aim_trial_record, front_cone_center, start_aim_trial, AimPhase,
-        AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_HITS_TO_FINISH, AIM_CAMERA_ORIGIN,
+        AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_CAMERA_ORIGIN, AIM_HITS_TO_FINISH,
     };
     use crate::camera_ctrl::YawPitch;
     use crate::config::{ExperimentSettings, ValidationState};
@@ -423,7 +416,11 @@ mod tests {
         assert_eq!(trial.live_targets.len(), GRIDSHOT_CONCURRENT);
         let mut cells = Vec::new();
         for t in &trial.live_targets {
-            assert!(!cells.contains(&(t.row, t.col)), "duplicate cell {:?}", (t.row, t.col));
+            assert!(
+                !cells.contains(&(t.row, t.col)),
+                "duplicate cell {:?}",
+                (t.row, t.col)
+            );
             cells.push((t.row, t.col));
             assert_eq!(t.center, gridshot_cell_center(t.row, t.col));
         }
@@ -562,7 +559,10 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(trial_a.target_events.len(), 3);
-        assert!(trial_a.target_events.iter().all(|e| e.event_type == "spawn"));
+        assert!(trial_a
+            .target_events
+            .iter()
+            .all(|e| e.event_type == "spawn"));
         assert_eq!(trial_a.live_targets[0].target_id, "target_001");
         assert_eq!(trial_a.live_targets[1].target_id, "target_002");
         assert_eq!(trial_a.live_targets[2].target_id, "target_003");
@@ -626,7 +626,11 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for e in &trial.target_events {
             if e.event_type == "spawn" {
-                assert!(seen.insert(e.target_id.clone()), "reused id {}", e.target_id);
+                assert!(
+                    seen.insert(e.target_id.clone()),
+                    "reused id {}",
+                    e.target_id
+                );
             }
         }
         assert_eq!(seen.len(), 4);
@@ -671,7 +675,9 @@ mod tests {
         assert_eq!(trial.shot_log.len(), 1);
         assert!(!trial.shot_log[0].hit);
         assert!(!trial.shot_log[0].target_id.is_empty());
-        assert!(before.iter().any(|t| t.target_id == trial.shot_log[0].target_id));
+        assert!(before
+            .iter()
+            .any(|t| t.target_id == trial.shot_log[0].target_id));
     }
 
     #[test]
@@ -738,8 +744,14 @@ mod tests {
         begin_aim_pause(&mut trial, 50_000_000_000); // 50s play then pause
         assert!(!gridshot_should_end(&trial, 200_000_000_000)); // huge wall, still paused at 50s
         end_aim_pause(&mut trial, 200_000_000_000);
-        assert!(!gridshot_should_end(&trial, 200_000_000_000 + 9_000_000_000)); // 59s active
-        assert!(gridshot_should_end(&trial, 200_000_000_000 + 10_000_000_000)); // 60s active
+        assert!(!gridshot_should_end(
+            &trial,
+            200_000_000_000 + 9_000_000_000
+        )); // 59s active
+        assert!(gridshot_should_end(
+            &trial,
+            200_000_000_000 + 10_000_000_000
+        )); // 60s active
     }
 
     #[test]
@@ -827,11 +839,8 @@ mod tests {
         }
         assert_eq!(trial.phase, AimPhase::Idle);
         assert_eq!(trial.hits, 5);
-        let record = build_completed_aim_trial_record(
-            &trial,
-            1_700_000_000_600,
-            start + 500_000_000,
-        );
+        let record =
+            build_completed_aim_trial_record(&trial, 1_700_000_000_600, start + 500_000_000);
         assert_eq!(record.trial_type, "STATIC_CLICK");
     }
 }

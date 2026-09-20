@@ -16,6 +16,8 @@ use crate::{
 
 /// Windows raw input: left button down bit in `RAWINPUT` mouse `ulButtons`.
 pub const RI_MOUSE_LEFT_BUTTON_DOWN: u32 = 0x0001;
+/// Windows raw input: left button up bit in `RAWINPUT` mouse `ulButtons`.
+pub const RI_MOUSE_LEFT_BUTTON_UP: u32 = 0x0002;
 
 pub const AIM_TARGET_RADIUS: f32 = 0.25;
 pub const AIM_CAMERA_ORIGIN: Vec3 = Vec3::new(0.0, 1.6, 4.0);
@@ -81,6 +83,7 @@ pub enum AimTaskKind {
     #[default]
     StaticClick,
     Gridshot,
+    Tracking,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,7 +112,14 @@ pub fn aim_persist_status_from_insert(
 ) -> AimPersistStatus {
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
-    let accuracy = if shots == 0 {
+    let accuracy = if trial.task_kind == AimTaskKind::Tracking {
+        let active_secs = active_elapsed_ns(trial, trial.last_timestamp_ns) as f64 / 1e9;
+        if active_secs <= f64::EPSILON {
+            0.0
+        } else {
+            (trial.score_secs.unwrap_or(0.0) / active_secs).clamp(0.0, 1.0)
+        }
+    } else if shots == 0 {
         0.0
     } else {
         hits as f64 / shots as f64
@@ -207,6 +217,10 @@ pub struct AimTrial {
     pub paused_at_qpc: Option<u64>,
     pub start_unix_ms: i64,
     pub score_secs: Option<f64>,
+    pub time_on_target_ns: u64,
+    pub lmb_held: bool,
+    pub tracking_vx: f32,
+    pub next_reverse_at_ns: Option<u64>,
     pub shot_log: Vec<AimShotRecord>,
     pub target_events: Vec<AimTargetEventRecord>,
     pub input_log: Vec<AimInputSampleRecord>,
@@ -241,6 +255,10 @@ impl Default for AimTrial {
             paused_at_qpc: None,
             start_unix_ms: 0,
             score_secs: None,
+            time_on_target_ns: 0,
+            lmb_held: false,
+            tracking_vx: 0.0,
+            next_reverse_at_ns: None,
             shot_log: Vec::new(),
             target_events: Vec::new(),
             input_log: Vec::new(),
@@ -333,6 +351,15 @@ pub fn left_button_down(buttons: u32) -> bool {
     buttons & RI_MOUSE_LEFT_BUTTON_DOWN != 0
 }
 
+pub fn update_lmb_held(held: &mut bool, buttons: u32) {
+    if buttons & RI_MOUSE_LEFT_BUTTON_DOWN != 0 {
+        *held = true;
+    }
+    if buttons & RI_MOUSE_LEFT_BUTTON_UP != 0 {
+        *held = false;
+    }
+}
+
 /// Match `apply_yaw_transform`: yaw * pitch, Bevy forward = local −Z.
 pub fn look_direction_neg_z(yaw_deg: f64, pitch_deg: f64) -> [f64; 3] {
     let yaw = Quat::from_rotation_y(-(yaw_deg.to_radians() as f32));
@@ -343,16 +370,14 @@ pub fn look_direction_neg_z(yaw_deg: f64, pitch_deg: f64) -> [f64; 3] {
 
 pub fn front_cone_center(yaw_off_deg: f64, pitch_off_deg: f64) -> Vec3 {
     let d = look_direction_neg_z(yaw_off_deg, pitch_off_deg);
-    let mut center = AIM_CAMERA_ORIGIN
-        + Vec3::new(d[0] as f32, d[1] as f32, d[2] as f32) * AIM_DISTANCE;
+    let mut center =
+        AIM_CAMERA_ORIGIN + Vec3::new(d[0] as f32, d[1] as f32, d[2] as f32) * AIM_DISTANCE;
     center.y = center.y.max(AIM_FLOOR_CLEARANCE);
     center
 }
 
 fn next_unit(rng: &mut u64) -> f64 {
-    *rng = rng
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1);
+    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
     ((*rng >> 33) as f64) / (u32::MAX as f64 + 1.0)
 }
 
@@ -384,8 +409,13 @@ pub fn begin_aim_pause(trial: &mut AimTrial, now_ns: u64) {
 
 pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
     if let Some(at) = trial.paused_at_qpc.take() {
-        trial.accumulated_pause_ns =
-            trial.accumulated_pause_ns.saturating_add(now_ns.saturating_sub(at));
+        let pause_ns = now_ns.saturating_sub(at);
+        trial.accumulated_pause_ns = trial.accumulated_pause_ns.saturating_add(pause_ns);
+        if trial.task_kind == AimTaskKind::Tracking {
+            trial.next_reverse_at_ns = trial
+                .next_reverse_at_ns
+                .map(|scheduled| scheduled.saturating_add(pause_ns));
+        }
         // The first post-resume sample starts a fresh input interval; otherwise
         // its raw dt includes the entire pause.
         trial.last_raw_timestamp_ns = None;
@@ -415,6 +445,10 @@ pub fn start_aim_trial(
     trial.hits = 0;
     trial.last_hit = None;
     trial.score_secs = None;
+    trial.time_on_target_ns = 0;
+    trial.lmb_held = false;
+    trial.tracking_vx = 0.0;
+    trial.next_reverse_at_ns = None;
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -436,6 +470,10 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.target_events.clear();
         trial.clear_sample_logs();
         trial.score_secs = None;
+        trial.time_on_target_ns = 0;
+        trial.lmb_held = false;
+        trial.tracking_vx = 0.0;
+        trial.next_reverse_at_ns = None;
         trial.last_hit = None;
         trial.current_target_id.clear();
         trial.next_target_ordinal = 1;
@@ -472,14 +510,27 @@ pub fn build_completed_aim_trial_record(
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
     let misses = shots.saturating_sub(hits);
-    let accuracy = if shots == 0 {
-        0.0
-    } else {
-        hits as f64 / shots as f64
-    };
     let active_secs = active_elapsed_ns(trial, end_timestamp_ns) as f64 / 1e9;
     let score_secs = trial.score_secs.unwrap_or(active_secs);
-    let duration_secs = score_secs;
+    let (duration_secs, accuracy) = if trial.task_kind == AimTaskKind::Tracking {
+        (
+            active_secs,
+            if active_secs <= f64::EPSILON {
+                0.0
+            } else {
+                (score_secs / active_secs).clamp(0.0, 1.0)
+            },
+        )
+    } else {
+        (
+            score_secs,
+            if shots == 0 {
+                0.0
+            } else {
+                hits as f64 / shots as f64
+            },
+        )
+    };
 
     let (trial_type, task_version, task_config_json) = match trial.task_kind {
         AimTaskKind::StaticClick => (
@@ -491,6 +542,11 @@ pub fn build_completed_aim_trial_record(
             crate::aim_gridshot::GRIDSHOT_TRIAL_TYPE.to_string(),
             crate::aim_gridshot::GRIDSHOT_TASK_VERSION.to_string(),
             crate::aim_gridshot::gridshot_task_config_json(),
+        ),
+        AimTaskKind::Tracking => (
+            "TRACKING".to_string(),
+            crate::aim_tracking::TRACKING_TASK_VERSION.to_string(),
+            crate::aim_tracking::tracking_task_config_json(),
         ),
     };
 
@@ -580,11 +636,7 @@ fn spawn_next_target(trial: &mut AimTrial, timestamp_ns: u64) {
 }
 
 /// Returns true if this click ended the whole run (5th hit).
-pub fn apply_aim_shot(
-    trial: &mut AimTrial,
-    pose: &YawPitch,
-    timestamp_ns: u64,
-) -> bool {
+pub fn apply_aim_shot(trial: &mut AimTrial, pose: &YawPitch, timestamp_ns: u64) -> bool {
     if trial.phase != AimPhase::Armed {
         return false;
     }
@@ -758,6 +810,14 @@ pub fn sync_aim_target(
                     *visibility = Visibility::Hidden;
                 }
             }
+            AimTaskKind::Tracking => {
+                if slot.0 == 0 {
+                    *visibility = Visibility::Visible;
+                    transform.translation = trial.current_center;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
         }
     }
 }
@@ -806,8 +866,15 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42, test_config()));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            42,
+            test_config()
+        ));
         let first = trial.current_center;
 
         // Aim away: miss
@@ -833,8 +900,15 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42, test_config()));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            42,
+            test_config()
+        ));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -856,8 +930,15 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let start = 5_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, start, 1_700_000_000_000
-        , 42, test_config()));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            42,
+            test_config()
+        ));
         for i in 0..AIM_HITS_TO_FINISH {
             trial.current_center = front_cone_center(0.0, 0.0);
             pose.yaw_deg = 0.0;
@@ -905,11 +986,7 @@ mod tests {
             } else {
                 start + 30_000_000_000 + (i as u64 + 1) * 100_000_000
             };
-            apply_aim_shot(
-                &mut trial,
-                &pose,
-                timestamp_ns,
-            );
+            apply_aim_shot(&mut trial, &pose, timestamp_ns);
         }
 
         assert!((trial.score_secs.expect("score") - 0.5).abs() < 1e-9);
@@ -920,8 +997,15 @@ mod tests {
         let mut trial = AimTrial::default();
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42, test_config()));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            42,
+            test_config()
+        ));
 
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
@@ -956,8 +1040,15 @@ mod tests {
         };
         let mut pose = YawPitch::default();
         let now = 1_000_000_000u64;
-        assert!(start_aim_trial(&mut pose, &mut trial, ValidationState::Idle, now, 1_700_000_000_000
-        , 42, test_config()));
+        assert!(start_aim_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            now,
+            1_700_000_000_000,
+            42,
+            test_config()
+        ));
         pose.yaw_deg = 90.0;
         assert!(!apply_aim_shot(&mut trial, &pose, now + 1));
 
@@ -1021,7 +1112,9 @@ mod tests {
         assert!(record
             .pitch_config_json
             .contains("\"pitch_sign\":\"+dy_look_down\""));
-        assert!(record.pitch_config_json.contains("\"certainty\":\"UNCERTAIN\""));
+        assert!(record
+            .pitch_config_json
+            .contains("\"certainty\":\"UNCERTAIN\""));
         assert_eq!(record.resolution_width, 1920);
         assert_eq!(record.resolution_height, 1080);
         assert!((record.aspect_ratio - 1920.0 / 1080.0).abs() < 1e-9);
@@ -1101,14 +1194,7 @@ mod tests {
         settings.dpi = 3200.0;
         settings.sensitivity = 0.09;
         settings.fov_degrees_h = 103.0;
-        let config = AimRunConfigSnapshot::from_live(
-            &settings,
-            "none",
-            "0.1.0",
-            "{}",
-            1920,
-            1080,
-        );
+        let config = AimRunConfigSnapshot::from_live(&settings, "none", "0.1.0", "{}", 1920, 1080);
         let start_ns = 5_000_000_000u64;
         assert!(start_aim_trial(
             &mut pose,
@@ -1134,15 +1220,21 @@ mod tests {
             apply_aim_shot(&mut trial, &pose, start_ns + (i as u64 + 1) * 100_000_000);
         }
 
-        let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, start_ns + 600_000_000);
+        let record =
+            build_completed_aim_trial_record(&trial, 1_700_000_000_600, start_ns + 600_000_000);
         assert_eq!(record.dpi, 3200.0);
         assert_eq!(record.sensitivity, 0.09);
         assert_eq!(record.fov_degrees_h, 103.0);
-        assert_eq!(record.polling_rate_hz, ExperimentSettings::default().polling_rate_hz as f64);
+        assert_eq!(
+            record.polling_rate_hz,
+            ExperimentSettings::default().polling_rate_hz as f64
+        );
         assert_eq!(record.processor_id, "none");
         assert_eq!(record.resolution_width, 1920);
         assert_eq!(record.resolution_height, 1080);
-        assert!(record.view_config_json.contains("\"horizontal_fov_deg\":103"));
+        assert!(record
+            .view_config_json
+            .contains("\"horizontal_fov_deg\":103"));
     }
 
     #[test]
@@ -1161,7 +1253,7 @@ mod tests {
                 1_700_000_000_000,
                 42,
                 test_config(),
-        ));
+            ));
             assert_eq!(trial.random_seed, 42);
             centers.push(trial.current_center);
             for i in 0..2 {
@@ -1386,13 +1478,22 @@ mod tests {
         trial.start_timestamp_ns = 1_000;
         trial.push_aim_input_sample(2_000, 1, 0, 1.0, 0.0, 0, None, None);
         // play 10s
-        assert_eq!(active_elapsed_ns(&trial, 1_000 + 10_000_000_000), 10_000_000_000);
+        assert_eq!(
+            active_elapsed_ns(&trial, 1_000 + 10_000_000_000),
+            10_000_000_000
+        );
         begin_aim_pause(&mut trial, 1_000 + 10_000_000_000);
         // wall +30s while paused → still 10s active
-        assert_eq!(active_elapsed_ns(&trial, 1_000 + 40_000_000_000), 10_000_000_000);
+        assert_eq!(
+            active_elapsed_ns(&trial, 1_000 + 40_000_000_000),
+            10_000_000_000
+        );
         end_aim_pause(&mut trial, 1_000 + 40_000_000_000);
         // +5s more play → 15s active
-        assert_eq!(active_elapsed_ns(&trial, 1_000 + 45_000_000_000), 15_000_000_000);
+        assert_eq!(
+            active_elapsed_ns(&trial, 1_000 + 45_000_000_000),
+            15_000_000_000
+        );
         assert_eq!(trial.next_input_dt_ns(1_000 + 40_000_000_001), 0);
     }
 
