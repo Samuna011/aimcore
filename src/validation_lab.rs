@@ -324,6 +324,7 @@ fn draw_lobby(
         "Static Click",
     );
     ui.radio_value(&mut lab_ui.selected_task, AimTaskKind::Gridshot, "Gridshot");
+    ui.radio_value(&mut lab_ui.selected_task, AimTaskKind::Tracking, "Tracking");
     ui.horizontal(|ui| {
         if ui
             .add_enabled(can_start, egui::Button::new("Start"))
@@ -765,10 +766,9 @@ fn draw_playing_hud(
                     } else {
                         score / elapsed
                     };
-                    format!(
-                        "TRACKING · {:.2}s · {:.1}% · {:.1}s",
+                    tracking_hud_line(
                         score,
-                        tracking_accuracy * 100.0,
+                        tracking_accuracy,
                         (TRACKING_DURATION_SECS - elapsed).max(0.0),
                     )
                 }
@@ -815,6 +815,13 @@ fn draw_playing_hud(
             });
             ui.monospace(format!("DB: {}", database_path().display()));
         });
+}
+
+fn tracking_hud_line(score_secs: f64, accuracy: f64, time_left_secs: f64) -> String {
+    format!(
+        "TRACKING · on-target {score_secs:.2}s · {:.0}% · left {time_left_secs:.1}s · hold LMB",
+        accuracy * 100.0,
+    )
 }
 
 fn draw_crosshair(ctx: &egui::Context) {
@@ -903,4 +910,17 @@ fn start_selected_trial(
         });
     }
     started
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tracking_hud_line;
+
+    #[test]
+    fn tracking_hud_names_score_accuracy_time_left_and_hold_hint() {
+        assert_eq!(
+            tracking_hud_line(12.345, 0.625, 4.25),
+            "TRACKING · on-target 12.35s · 62% · left 4.2s · hold LMB"
+        );
+    }
 }

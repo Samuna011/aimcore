@@ -62,13 +62,19 @@ pub fn camera_pose_at(samples: &[AimCameraSampleRecord], t_ns: u64) -> (f64, f64
 }
 
 pub fn live_targets_at(events: &[AimTargetEventRecord], t_ns: u64) -> Vec<(String, f64, f64, f64)> {
-    let mut live_targets = BTreeMap::new();
+    let mut live_targets: BTreeMap<String, (f64, f64, f64, f64, u64)> = BTreeMap::new();
     for event in events.iter().filter(|event| event.timestamp_ns <= t_ns) {
         match event.event_type.as_str() {
-            "spawn" => {
+            "spawn" | "direction_change" => {
                 live_targets.insert(
                     event.target_id.clone(),
-                    (event.position_x, event.position_y, event.position_z),
+                    (
+                        event.position_x,
+                        event.position_y,
+                        event.position_z,
+                        event.velocity_x,
+                        event.timestamp_ns,
+                    ),
                 );
             }
             "despawn" => {
@@ -79,7 +85,10 @@ pub fn live_targets_at(events: &[AimTargetEventRecord], t_ns: u64) -> Vec<(Strin
     }
     live_targets
         .into_iter()
-        .map(|(target_id, (x, y, z))| (target_id, x, y, z))
+        .map(|(target_id, (x, y, z, velocity_x, last_event_ns))| {
+            let elapsed_s = t_ns.saturating_sub(last_event_ns) as f64 / 1e9;
+            (target_id, x + velocity_x * elapsed_s, y, z)
+        })
         .collect()
 }
 
@@ -234,12 +243,36 @@ mod tests {
 
         assert_eq!(
             live_targets_at(&events, 125),
-            vec![("a".into(), 4.0, 5.0, 6.0), ("b".into(), 1.0, 2.0, 3.0),]
+            vec![("a".into(), 4.0, 5.0, 6.0), ("b".into(), 9.0, 9.0, 9.0),]
         );
         assert_eq!(
             live_targets_at(&events, 140),
             vec![("b".into(), 7.0, 8.0, 9.0)]
         );
+    }
+
+    #[test]
+    fn live_targets_integrate_velocity_between_direction_changes() {
+        let mut spawn = target_event("tracking", 0, 1_000_000_000, "spawn", (0.0, 1.6, -6.0));
+        spawn.velocity_x = 1.2;
+        let mut reverse = target_event(
+            "tracking",
+            1,
+            3_000_000_000,
+            "direction_change",
+            (2.4, 1.6, -6.0),
+        );
+        reverse.velocity_x = -1.2;
+        let events = vec![spawn, reverse];
+
+        assert_eq!(
+            live_targets_at(&events, 2_000_000_000),
+            vec![("tracking".into(), 1.2, 1.6, -6.0)]
+        );
+        let after_reverse = live_targets_at(&events, 3_500_000_000);
+        assert_eq!(after_reverse[0].0, "tracking");
+        assert!((after_reverse[0].1 - 1.8).abs() < 1e-12);
+        assert_eq!((after_reverse[0].2, after_reverse[0].3), (1.6, -6.0));
     }
 
     #[test]
