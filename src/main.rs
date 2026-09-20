@@ -1,5 +1,6 @@
 mod aim_gridshot;
 mod aim_replay;
+mod aim_tracking;
 mod aim_trial;
 mod app;
 mod camera_ctrl;
