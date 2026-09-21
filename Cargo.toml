@@ -7,6 +7,7 @@ members = [
     "crates/sense-types",
     "crates/sense-input-win",
     "crates/sense-telemetry",
+    "crates/sense-analysis",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ sense-math = { path = "crates/sense-math" }
 sense-types = { path = "crates/sense-types" }
 sense-input-win = { path = "crates/sense-input-win" }
 sense-telemetry = { path = "crates/sense-telemetry" }
+sense-analysis = { path = "crates/sense-analysis" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

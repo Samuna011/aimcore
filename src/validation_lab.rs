@@ -761,14 +761,18 @@ fn draw_playing_hud(
                 ),
                 AimTaskKind::Tracking => {
                     let score = aim.time_on_target_ns as f64 / 1e9;
-                    let tracking_accuracy = if elapsed <= f64::EPSILON {
+                    let shots = aim.shot_log.len() as u32;
+                    let hits = aim.hits;
+                    let tracking_accuracy = if shots == 0 {
                         0.0
                     } else {
-                        score / elapsed
+                        hits as f64 / shots as f64
                     };
                     tracking_hud_line(
-                        score,
+                        hits,
+                        shots,
                         tracking_accuracy,
+                        score,
                         (TRACKING_DURATION_SECS - elapsed).max(0.0),
                     )
                 }
@@ -817,9 +821,15 @@ fn draw_playing_hud(
         });
 }
 
-fn tracking_hud_line(score_secs: f64, accuracy: f64, time_left_secs: f64) -> String {
+fn tracking_hud_line(
+    hits: u32,
+    shots: u32,
+    accuracy: f64,
+    on_target_secs: f64,
+    time_left_secs: f64,
+) -> String {
     format!(
-        "TRACKING · on-target {score_secs:.2}s · {:.0}% · left {time_left_secs:.1}s · hold LMB",
+        "TRACKING · {hits}/{shots} · {:.0}% · on-target {on_target_secs:.1}s · left {time_left_secs:.1}s · hold LMB",
         accuracy * 100.0,
     )
 }
@@ -905,7 +915,7 @@ fn start_selected_trial(
                 "Gridshot armed — {GRIDSHOT_DURATION_SECS:.0}s, {GRIDSHOT_CONCURRENT} live targets."
             ),
             AimTaskKind::Tracking => {
-                format!("Tracking armed — hold LMB on target for {TRACKING_DURATION_SECS:.0}s.")
+                format!("Tracking armed — hold LMB; 20 Hz fire · {TRACKING_DURATION_SECS:.0}s.")
             }
         });
     }
@@ -919,8 +929,8 @@ mod tests {
     #[test]
     fn tracking_hud_names_score_accuracy_time_left_and_hold_hint() {
         assert_eq!(
-            tracking_hud_line(12.345, 0.625, 4.25),
-            "TRACKING · on-target 12.35s · 62% · left 4.2s · hold LMB"
+            tracking_hud_line(12, 20, 0.6, 4.3, 10.0),
+            "TRACKING · 12/20 · 60% · on-target 4.3s · left 10.0s · hold LMB"
         );
     }
 }

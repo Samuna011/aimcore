@@ -32,9 +32,10 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.12.0";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.12.2";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
-pub const STATIC_CLICK_TASK_VERSION: &str = "1";
+/// Bumped to `"2"` with full-unit LCG (`lcg_next_unit` ∈ [0, 1)).
+pub const STATIC_CLICK_TASK_VERSION: &str = "2";
 pub const PITCH_MODEL_ID: &str = "unverified_0.1";
 pub const PITCH_MODEL_VERSION: &str = "1";
 
@@ -113,12 +114,11 @@ pub fn aim_persist_status_from_insert(
     let shots = trial.shot_log.len() as u32;
     let hits = trial.hits;
     let accuracy = if trial.task_kind == AimTaskKind::Tracking {
-        let active_secs = (active_elapsed_ns(trial, trial.last_timestamp_ns) as f64 / 1e9)
-            .min(crate::aim_tracking::TRACKING_DURATION_SECS);
-        if active_secs <= f64::EPSILON {
+        // v2: shot-based accuracy (hits/shots). Empty shot log → 0.
+        if shots == 0 {
             0.0
         } else {
-            (trial.score_secs.unwrap_or(0.0) / active_secs).clamp(0.0, 1.0)
+            hits as f64 / shots as f64
         }
     } else if shots == 0 {
         0.0
@@ -223,6 +223,8 @@ pub struct AimTrial {
     pub tracking_vx: f32,
     pub next_reverse_at_ns: Option<u64>,
     pub last_tracking_tick_ns: Option<u64>,
+    /// Next QPC at which a TRACKING v2 virtual shot may fire (None = not armed for fire).
+    pub next_tracking_shot_ns: Option<u64>,
     pub shot_log: Vec<AimShotRecord>,
     pub target_events: Vec<AimTargetEventRecord>,
     pub input_log: Vec<AimInputSampleRecord>,
@@ -262,6 +264,7 @@ impl Default for AimTrial {
             tracking_vx: 0.0,
             next_reverse_at_ns: None,
             last_tracking_tick_ns: None,
+            next_tracking_shot_ns: None,
             shot_log: Vec::new(),
             target_events: Vec::new(),
             input_log: Vec::new(),
@@ -379,13 +382,17 @@ pub fn front_cone_center(yaw_off_deg: f64, pitch_off_deg: f64) -> Vec3 {
     center
 }
 
-fn next_unit(rng: &mut u64) -> f64 {
+/// Mulberry-style LCG unit in **[0, 1)**.
+///
+/// Uses `>> 33` (31 bits) over `2^31` so the full half-open unit interval is
+/// reachable. The previous divisor `2^32` incorrectly confined draws to [0, 0.5).
+pub(crate) fn lcg_next_unit(rng: &mut u64) -> f64 {
     *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-    ((*rng >> 33) as f64) / (u32::MAX as f64 + 1.0)
+    ((*rng >> 33) as f64) / ((1u64 << 31) as f64)
 }
 
 fn next_range(rng: &mut u64, lo: f64, hi: f64) -> f64 {
-    lo + next_unit(rng) * (hi - lo)
+    lo + lcg_next_unit(rng) * (hi - lo)
 }
 
 /// Draw a random front-cone pose: `(center, yaw_off_deg, pitch_off_deg)`.
@@ -420,6 +427,10 @@ pub fn end_aim_pause(trial: &mut AimTrial, now_ns: u64) {
         if trial.task_kind == AimTaskKind::Tracking {
             trial.next_reverse_at_ns = trial
                 .next_reverse_at_ns
+                .map(|scheduled| scheduled.saturating_add(pause_ns));
+            // Freeze rapid-fire schedule across pause (active-time grid).
+            trial.next_tracking_shot_ns = trial
+                .next_tracking_shot_ns
                 .map(|scheduled| scheduled.saturating_add(pause_ns));
             trial.last_tracking_tick_ns = Some(now_ns);
             crate::aim_tracking::push_tracking_direction_event(trial, now_ns, trial.tracking_vx);
@@ -458,6 +469,7 @@ pub fn start_aim_trial(
     trial.tracking_vx = 0.0;
     trial.next_reverse_at_ns = None;
     trial.last_tracking_tick_ns = None;
+    trial.next_tracking_shot_ns = None;
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -484,6 +496,7 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
         trial.tracking_vx = 0.0;
         trial.next_reverse_at_ns = None;
         trial.last_tracking_tick_ns = None;
+        trial.next_tracking_shot_ns = None;
         trial.last_hit = None;
         trial.current_target_id.clear();
         trial.next_target_ordinal = 1;
@@ -497,7 +510,7 @@ pub fn cancel_aim_trial(trial: &mut AimTrial) {
 
 pub fn static_click_task_config_json() -> String {
     format!(
-        r#"{{"hits_required":{},"target_radius":{},"aim_distance":{},"yaw_half_deg":{},"pitch_up_deg":{},"pitch_down_deg":{},"floor_clearance":{},"rng":"lcg","rng_version":"1"}}"#,
+        r#"{{"hits_required":{},"target_radius":{},"aim_distance":{},"yaw_half_deg":{},"pitch_up_deg":{},"pitch_down_deg":{},"floor_clearance":{},"rng":"lcg","rng_version":"2"}}"#,
         AIM_HITS_TO_FINISH,
         AIM_TARGET_RADIUS,
         AIM_DISTANCE,
@@ -526,10 +539,10 @@ pub fn build_completed_aim_trial_record(
         let active_duration = active_secs.min(crate::aim_tracking::TRACKING_DURATION_SECS);
         (
             active_duration,
-            if active_duration <= f64::EPSILON {
+            if shots == 0 {
                 0.0
             } else {
-                (score_secs / active_duration).clamp(0.0, 1.0)
+                hits as f64 / shots as f64
             },
         )
     } else {
@@ -1103,7 +1116,7 @@ mod tests {
         let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.12.0");
+        assert_eq!(record.experiment_version, "0.12.2");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());
@@ -1112,7 +1125,7 @@ mod tests {
         assert_eq!(record.processor_config_json, r#"{"acceleration":0.01}"#);
         assert!(record.task_config_json.contains("\"hits_required\":5"));
         assert!(record.task_config_json.contains("\"rng\":\"lcg\""));
-        assert!(record.task_config_json.contains("\"rng_version\":\"1\""));
+        assert!(record.task_config_json.contains("\"rng_version\":\"2\""));
         assert_eq!(record.random_seed, 42);
         assert_eq!(record.task_version, STATIC_CLICK_TASK_VERSION);
         assert_eq!(record.pitch_model_id, "unverified_0.1");
@@ -1296,6 +1309,30 @@ mod tests {
         ));
         assert_eq!(trial_other.random_seed, 43);
         assert_ne!(centers_a[0], trial_other.current_center);
+    }
+
+    #[test]
+    fn lcg_next_unit_covers_upper_half() {
+        let mut rng = 7u64;
+        let mut max_u = 0.0f64;
+        let mut saw_positive_yaw = false;
+        for _ in 0..2_000 {
+            let u = super::lcg_next_unit(&mut rng);
+            assert!((0.0..1.0).contains(&u));
+            max_u = max_u.max(u);
+            let yaw = -AIM_YAW_HALF_DEG + u * (2.0 * AIM_YAW_HALF_DEG);
+            if yaw > 0.0 {
+                saw_positive_yaw = true;
+            }
+        }
+        assert!(
+            max_u > 0.5,
+            "full-unit LCG must exceed 0.5 (got max {max_u})"
+        );
+        assert!(
+            saw_positive_yaw,
+            "STATIC_CLICK yaw range must reach positive half of cone"
+        );
     }
 
     #[test]

@@ -1,12 +1,12 @@
-//! TRACKING v1: horizontal strafe motion and hold-to-score helpers (pure logic).
+//! TRACKING: horizontal strafe motion and hold rapid-fire scoring helpers (pure logic).
 
 use bevy::prelude::Vec3;
-use sense_types::AimTargetEventRecord;
+use sense_types::{AimShotRecord, AimTargetEventRecord};
 
 use crate::{
     aim_trial::{
-        active_elapsed_ns, format_target_id, look_direction_neg_z, update_lmb_held, AimPhase,
-        AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_CAMERA_ORIGIN,
+        active_elapsed_ns, format_target_id, lcg_next_unit, look_direction_neg_z, update_lmb_held,
+        AimPhase, AimRunConfigSnapshot, AimTaskKind, AimTrial, AIM_CAMERA_ORIGIN,
     },
     camera_ctrl::YawPitch,
     config::ValidationState,
@@ -21,17 +21,13 @@ pub const TRACKING_X_MAX: f32 = 1.5;
 pub const TRACKING_SPEED: f32 = 1.2;
 pub const TRACKING_REVERSE_DELAY_MIN_S: f64 = 1.5;
 pub const TRACKING_REVERSE_DELAY_MAX_S: f64 = 3.5;
-pub const TRACKING_TASK_VERSION: &str = "1";
-
-/// Same LCG as STATIC_CLICK / GRIDSHOT: Mulberry-style advance, unit in [0, 1).
-fn next_unit(rng: &mut u64) -> f64 {
-    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-    ((*rng >> 33) as f64) / ((1u64 << 31) as f64)
-}
+pub const TRACKING_TASK_VERSION: &str = "2";
+pub const TRACKING_FIRE_RATE_HZ: f64 = 20.0;
+pub const TRACKING_FIRE_INTERVAL_NS: u64 = 50_000_000; // 1/20 s
 
 pub fn tracking_task_config_json() -> String {
     format!(
-        r#"{{"duration_secs":{},"radius":{},"y":{},"z":{},"x_min":{},"x_max":{},"speed":{},"reverse_delay_min_secs":{},"reverse_delay_max_secs":{},"scoring_rule":"hold_and_ray","rng":"lcg","rng_version":"1"}}"#,
+        r#"{{"duration_secs":{},"radius":{},"y":{},"z":{},"x_min":{},"x_max":{},"speed":{},"reverse_delay_min_secs":{},"reverse_delay_max_secs":{},"scoring_rule":"hold_rapid_fire","fire_rate_hz":{},"rng":"lcg","rng_version":"1"}}"#,
         TRACKING_DURATION_SECS,
         TRACKING_RADIUS,
         TRACKING_Y,
@@ -41,6 +37,7 @@ pub fn tracking_task_config_json() -> String {
         TRACKING_SPEED,
         TRACKING_REVERSE_DELAY_MIN_S,
         TRACKING_REVERSE_DELAY_MAX_S,
+        TRACKING_FIRE_RATE_HZ,
     )
 }
 
@@ -67,7 +64,7 @@ pub fn step_strafe(x: f32, vx: f32, dt_s: f64, x_min: f32, x_max: f32) -> (f32, 
 /// Sample next reverse delay seconds from LCG rng in `[min_s, max_s)`.
 pub fn next_reverse_delay_s(rng: &mut u64, min_s: f64, max_s: f64) -> f64 {
     debug_assert!(min_s <= max_s);
-    min_s + next_unit(rng) * (max_s - min_s)
+    min_s + lcg_next_unit(rng) * (max_s - min_s)
 }
 
 /// Flip vx (preserve speed magnitude).
@@ -175,6 +172,7 @@ pub fn start_tracking_trial(
     };
     trial.next_reverse_at_ns = None;
     trial.last_tracking_tick_ns = Some(now_ns);
+    trial.next_tracking_shot_ns = None;
     trial.shot_log.clear();
     trial.target_events.clear();
     trial.clear_sample_logs();
@@ -275,6 +273,8 @@ pub fn tick_tracking_frame_logic(
         dt_ns,
     ));
 
+    emit_tracking_rapid_fire(trial, pose, now_ns);
+
     if tracking_should_end(trial, now_ns) {
         finish_tracking_trial(trial, now_ns);
         return TrackingTickResult::Finished;
@@ -282,16 +282,74 @@ pub fn tick_tracking_frame_logic(
     TrackingTickResult::Continue
 }
 
+/// While LMB held: fire at 20 Hz on the QPC grid (pause-safe — only called when not paused).
+fn emit_tracking_rapid_fire(trial: &mut AimTrial, pose: &YawPitch, now_ns: u64) {
+    if !trial.lmb_held {
+        trial.next_tracking_shot_ns = None;
+        return;
+    }
+    let mut next = trial.next_tracking_shot_ns.unwrap_or(now_ns);
+    // Cap catch-up so a long hitch cannot enqueue thousands of identical shots.
+    let mut fired = 0u32;
+    const MAX_CATCH_UP: u32 = 40; // 2 s at 20 Hz
+    while next <= now_ns && fired < MAX_CATCH_UP {
+        push_tracking_virtual_shot(trial, pose, next);
+        next = next.saturating_add(TRACKING_FIRE_INTERVAL_NS);
+        fired += 1;
+    }
+    trial.next_tracking_shot_ns = Some(next);
+}
+
+fn push_tracking_virtual_shot(trial: &mut AimTrial, pose: &YawPitch, timestamp_ns: u64) {
+    let origin = [
+        AIM_CAMERA_ORIGIN.x as f64,
+        AIM_CAMERA_ORIGIN.y as f64,
+        AIM_CAMERA_ORIGIN.z as f64,
+    ];
+    let center = [
+        trial.current_center.x as f64,
+        trial.current_center.y as f64,
+        trial.current_center.z as f64,
+    ];
+    let hit = sense_math::ray_sphere_hit(
+        origin,
+        look_direction_neg_z(pose.yaw_deg, pose.pitch_deg),
+        center,
+        TRACKING_RADIUS as f64,
+    );
+    trial.shot_log.push(AimShotRecord {
+        shot_index: trial.shot_log.len() as u32,
+        timestamp_ns,
+        hit,
+        yaw_deg: pose.yaw_deg,
+        pitch_deg: pose.pitch_deg,
+        target_x: center[0],
+        target_y: center[1],
+        target_z: center[2],
+        target_radius: TRACKING_RADIUS as f64,
+        target_id: trial.current_target_id.clone(),
+    });
+    if hit {
+        trial.hits = trial.hits.saturating_add(1);
+    }
+    trial.last_hit = Some(hit);
+    trial.last_yaw_deg = pose.yaw_deg;
+    trial.last_pitch_deg = pose.pitch_deg;
+    trial.last_timestamp_ns = timestamp_ns;
+}
+
 pub fn finish_tracking_trial(trial: &mut AimTrial, end_ns: u64) -> bool {
     if trial.phase != AimPhase::Armed || trial.task_kind != AimTaskKind::Tracking {
         return false;
     }
+    // Secondary diagnostic: on-target hold time. Primary score is hits/shots/accuracy.
     trial.score_secs = Some(trial.time_on_target_ns as f64 / 1e9);
     trial.last_timestamp_ns = end_ns;
     push_tracking_event(trial, end_ns, "despawn", 0.0);
     trial.lmb_held = false;
     trial.next_reverse_at_ns = None;
     trial.last_tracking_tick_ns = None;
+    trial.next_tracking_shot_ns = None;
     trial.phase = AimPhase::Idle;
     true
 }
@@ -453,7 +511,7 @@ mod tests {
 
     #[test]
     fn task_config_json_has_required_knobs() {
-        assert_eq!(TRACKING_TASK_VERSION, "1");
+        assert_eq!(TRACKING_TASK_VERSION, "2");
         let j = tracking_task_config_json();
         assert!(j.contains("\"duration_secs\":30"));
         assert!(j.contains(&format!("\"radius\":{}", TRACKING_RADIUS)));
@@ -464,7 +522,8 @@ mod tests {
         assert!(j.contains(&format!("\"speed\":{}", TRACKING_SPEED)));
         assert!(j.contains("\"reverse_delay_min_secs\":1.5"));
         assert!(j.contains("\"reverse_delay_max_secs\":3.5"));
-        assert!(j.contains("\"scoring_rule\":\"hold_and_ray\""));
+        assert!(j.contains("\"scoring_rule\":\"hold_rapid_fire\""));
+        assert!(j.contains("\"fire_rate_hz\":20"));
         assert!(j.contains("\"rng\":\"lcg\""));
         assert!(j.contains("\"rng_version\":\"1\""));
     }
@@ -516,7 +575,10 @@ mod tests {
         sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_UP);
         tick_tracking_frame_logic(&mut trial, &pose, start + 40);
         assert_eq!(trial.time_on_target_ns, 10);
-        assert!(trial.shot_log.is_empty());
+        // Rapid-fire only while held: one shot at press tick (start+20), none after release.
+        assert_eq!(trial.shot_log.len(), 1);
+        assert!(trial.shot_log[0].hit);
+        assert_eq!(trial.hits, 1);
     }
 
     #[test]
@@ -656,13 +718,29 @@ mod tests {
             test_config(),
         ));
         trial.time_on_target_ns = 12_000_000_000;
+        // Simulate 10 hits / 20 shots for primary accuracy.
+        trial.hits = 10;
+        for i in 0..20 {
+            trial.shot_log.push(sense_types::AimShotRecord {
+                shot_index: i,
+                timestamp_ns: start + i as u64 * TRACKING_FIRE_INTERVAL_NS,
+                hit: i < 10,
+                yaw_deg: 0.0,
+                pitch_deg: 0.0,
+                target_x: 0.0,
+                target_y: TRACKING_Y as f64,
+                target_z: TRACKING_Z as f64,
+                target_radius: TRACKING_RADIUS as f64,
+                target_id: "target_001".into(),
+            });
+        }
 
         assert!(!tracking_should_end(&trial, start + 29_999_999_999));
         let end = start + 30_500_000_000;
         assert!(tracking_should_end(&trial, end));
         assert!(finish_tracking_trial(&mut trial, end));
         assert_eq!(trial.score_secs, Some(12.0));
-        assert!(trial.shot_log.is_empty());
+        assert_eq!(trial.shot_log.len(), 20);
         assert_eq!(
             trial
                 .target_events
@@ -675,14 +753,90 @@ mod tests {
         assert_eq!(trial.task_kind, AimTaskKind::Tracking);
         assert_eq!(record.trial_type, "TRACKING");
         assert_eq!(record.task_version, TRACKING_TASK_VERSION);
-        assert_eq!(record.hits, 0);
-        assert_eq!(record.shots, 0);
-        assert_eq!(record.misses, 0);
+        assert_eq!(record.hits, 10);
+        assert_eq!(record.shots, 20);
+        assert_eq!(record.misses, 10);
         assert_eq!(record.duration_secs, TRACKING_DURATION_SECS);
         assert_eq!(record.score_secs, 12.0);
-        assert!((record.accuracy - 12.0 / TRACKING_DURATION_SECS).abs() < 1e-12);
+        assert!((record.accuracy - 0.5).abs() < 1e-12);
 
         let status = aim_persist_status_from_insert(&trial, Ok("tracking_test".into()));
-        assert!((status.accuracy - 12.0 / TRACKING_DURATION_SECS).abs() < 1e-12);
+        assert!((status.accuracy - 0.5).abs() < 1e-12);
+        assert_eq!(status.hits, 10);
+        assert_eq!(status.shots, 20);
+    }
+
+    #[test]
+    fn rapid_fire_emits_20hz_shots_only_while_held() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let start = 1_000_000_000u64;
+        assert!(start_tracking_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            1,
+            test_config(),
+        ));
+        trial.tracking_vx = 0.0;
+
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_DOWN);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 1);
+        assert_eq!(trial.shot_log.len(), 1);
+        assert!(trial.shot_log[0].hit);
+
+        tick_tracking_frame_logic(&mut trial, &pose, start + 1 + TRACKING_FIRE_INTERVAL_NS);
+        assert_eq!(trial.shot_log.len(), 2);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 1 + 2 * TRACKING_FIRE_INTERVAL_NS);
+        assert_eq!(trial.shot_log.len(), 3);
+        assert_eq!(trial.hits, 3);
+
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_UP);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 200_000_000);
+        assert_eq!(trial.shot_log.len(), 3);
+
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_DOWN);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 200_000_001);
+        assert_eq!(trial.shot_log.len(), 4);
+    }
+
+    #[test]
+    fn pause_freezes_rapid_fire_schedule() {
+        let mut trial = AimTrial::default();
+        let mut pose = YawPitch::default();
+        let start = 6_000_000_000u64;
+        assert!(start_tracking_trial(
+            &mut pose,
+            &mut trial,
+            ValidationState::Idle,
+            start,
+            1_700_000_000_000,
+            3,
+            test_config(),
+        ));
+        trial.tracking_vx = 0.0;
+        sync_tracking_lmb_from_sample(&mut trial, RI_MOUSE_LEFT_BUTTON_DOWN);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 1);
+        assert_eq!(trial.shot_log.len(), 1);
+        let next = trial.next_tracking_shot_ns.expect("schedule after first shot");
+
+        begin_aim_pause(&mut trial, start + 10_000_000);
+        tick_tracking_frame_logic(&mut trial, &pose, start + 5_010_000_000);
+        assert_eq!(trial.shot_log.len(), 1);
+
+        end_aim_pause(&mut trial, start + 5_010_000_000);
+        assert_eq!(
+            trial.next_tracking_shot_ns,
+            Some(next + 5_000_000_000),
+            "fire schedule shifts by pause duration"
+        );
+        // Still before shifted next → no new shot
+        tick_tracking_frame_logic(&mut trial, &pose, start + 5_010_000_001);
+        assert_eq!(trial.shot_log.len(), 1);
+        // At shifted next → fire
+        tick_tracking_frame_logic(&mut trial, &pose, next + 5_000_000_000);
+        assert_eq!(trial.shot_log.len(), 2);
     }
 }

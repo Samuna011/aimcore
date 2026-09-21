@@ -828,7 +828,7 @@ fn list_aim_trials_summary_orders_newest_first_and_honors_limit() {
     newer.shots = 15;
     newer.accuracy = 0.8;
     newer.score_secs = 3.5;
-    newer.experiment_version = "0.12.0".into();
+    newer.experiment_version = "0.12.1".into();
     let newer_id = db
         .insert_completed_aim_trial("20260919", &newer, &[], &[], &[], &[])
         .unwrap();
@@ -843,7 +843,7 @@ fn list_aim_trials_summary_orders_newest_first_and_honors_limit() {
     assert_eq!(summary.shots, 15);
     assert!((summary.accuracy - 0.8).abs() < f64::EPSILON);
     assert!((summary.score_secs - 3.5).abs() < f64::EPSILON);
-    assert_eq!(summary.experiment_version, "0.12.0");
+    assert_eq!(summary.experiment_version, "0.12.1");
     assert_eq!(summary.end_unix_ms, newer.end_unix_ms);
     assert_ne!(summary.id, older_id);
 }
@@ -954,4 +954,52 @@ fn load_aim_trial_bundle_roundtrips_and_orders_children() {
         vec![camera_samples[1].clone(), camera_samples[0].clone()]
     );
     assert!(db.load_aim_trial_bundle("missing").is_err());
+}
+
+#[test]
+fn load_aim_trial_analysis_bundle_includes_ordered_inputs() {
+    let db = TelemetryDb::open(Path::new(":memory:")).unwrap();
+    db.migrate().unwrap();
+
+    let trial = sample_aim_trial("completed");
+    let input_samples = vec![
+        AimInputSampleRecord {
+            timestamp_ns: 1_200_000_000,
+            sequence_number: 1,
+            raw_dx: 2,
+            raw_dy: 0,
+            processed_dx: 2.0,
+            processed_dy: 0.0,
+            dt_ns: 100_000_000,
+            dt_used_ns: 100_000_000,
+            input_speed: Some(2.0),
+            acceleration_scale: Some(1.1),
+        },
+        AimInputSampleRecord {
+            timestamp_ns: 1_100_000_000,
+            sequence_number: 0,
+            raw_dx: 1,
+            raw_dy: 0,
+            processed_dx: 1.0,
+            processed_dy: 0.0,
+            dt_ns: 0,
+            dt_used_ns: 0,
+            input_speed: None,
+            acceleration_scale: None,
+        },
+    ];
+    let trial_id = db
+        .insert_completed_aim_trial("20260920", &trial, &[], &[], &input_samples, &[])
+        .unwrap();
+
+    let bundle = db.load_aim_trial_analysis_bundle(&trial_id).unwrap();
+    assert_eq!(bundle.input_samples.len(), 2);
+    assert_eq!(bundle.input_samples[0].sequence_number, 0);
+    assert_eq!(bundle.input_samples[0].timestamp_ns, 1_100_000_000);
+    assert_eq!(bundle.input_samples[1].sequence_number, 1);
+    assert_eq!(
+        bundle.input_samples[1].acceleration_scale,
+        Some(1.1)
+    );
+    assert!(db.load_aim_trial_analysis_bundle("missing").is_err());
 }

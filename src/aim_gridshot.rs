@@ -13,7 +13,8 @@ pub const GRIDSHOT_DURATION_SECS: f64 = 60.0;
 pub const GRIDSHOT_CONCURRENT: usize = 3;
 pub const GRIDSHOT_SPACING: f32 = 1.0;
 pub const GRIDSHOT_DEPTH_Z: f32 = -6.0;
-pub const GRIDSHOT_TASK_VERSION: &str = "1";
+/// Bumped to `"2"` with full-unit LCG (`lcg_next_unit` ∈ [0, 1)).
+pub const GRIDSHOT_TASK_VERSION: &str = "2";
 pub const GRIDSHOT_GRID_ROWS: i32 = 3;
 pub const GRIDSHOT_GRID_COLS: i32 = 3;
 pub const GRIDSHOT_TRIAL_TYPE: &str = "GRIDSHOT";
@@ -31,15 +32,9 @@ pub const GRIDSHOT_CELLS: [(i32, i32); 9] = [
     (1, 1),
 ];
 
-/// Same LCG as STATIC_CLICK (`aim_trial`): Mulberry-style advance, unit in [0,1).
-fn next_unit(rng: &mut u64) -> f64 {
-    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-    ((*rng >> 33) as f64) / (u32::MAX as f64 + 1.0)
-}
-
 fn next_index(rng: &mut u64, n: usize) -> usize {
     debug_assert!(n > 0);
-    (next_unit(rng) * n as f64) as usize % n
+    (crate::aim_trial::lcg_next_unit(rng) * n as f64) as usize % n
 }
 
 /// World-space center of a grid cell. `row`/`col` in `{-1,0,1}`.
@@ -53,7 +48,7 @@ pub fn gridshot_cell_center(row: i32, col: i32) -> Vec3 {
 
 pub fn gridshot_task_config_json() -> String {
     format!(
-        r#"{{"grid_rows":{},"grid_cols":{},"concurrent_targets":{},"duration_secs":{},"spacing":{},"depth":{},"radius":{},"rng":"lcg","rng_version":"1"}}"#,
+        r#"{{"grid_rows":{},"grid_cols":{},"concurrent_targets":{},"duration_secs":{},"spacing":{},"depth":{},"radius":{},"rng":"lcg","rng_version":"2"}}"#,
         GRIDSHOT_GRID_ROWS,
         GRIDSHOT_GRID_COLS,
         GRIDSHOT_CONCURRENT,
@@ -474,6 +469,19 @@ mod tests {
     }
 
     #[test]
+    fn lcg_full_unit_can_select_all_nine_cells() {
+        let mut seen = [false; 9];
+        let mut rng = 1u64;
+        for _ in 0..5_000 {
+            seen[next_index(&mut rng, 9)] = true;
+        }
+        assert!(
+            seen.iter().all(|&s| s),
+            "expected all 9 cell indices over many draws, got {seen:?}"
+        );
+    }
+
+    #[test]
     fn pick_vacant_never_occupied() {
         let occupied = [(-1, 0), (0, 0), (1, 1)];
         let mut rng = 7u64;
@@ -499,7 +507,7 @@ mod tests {
 
     #[test]
     fn task_config_json_has_required_knobs() {
-        assert_eq!(GRIDSHOT_TASK_VERSION, "1");
+        assert_eq!(GRIDSHOT_TASK_VERSION, "2");
         assert_eq!(GRIDSHOT_TRIAL_TYPE, "GRIDSHOT");
         let j = gridshot_task_config_json();
         assert!(j.contains("\"grid_rows\":3"));
@@ -510,7 +518,7 @@ mod tests {
         assert!(j.contains("\"depth\":-6") || j.contains("\"depth\":-6.0"));
         assert!(j.contains(&format!("\"radius\":{}", AIM_TARGET_RADIUS)));
         assert!(j.contains("\"rng\":\"lcg\""));
-        assert!(j.contains("\"rng_version\":\"1\""));
+        assert!(j.contains("\"rng_version\":\"2\""));
     }
 
     #[test]

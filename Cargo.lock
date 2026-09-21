@@ -4935,6 +4935,17 @@ name = "sense-accel"
 version = "0.1.0"
 
 [[package]]
+name = "sense-analysis"
+version = "0.1.0"
+dependencies = [
+ "sense-accel",
+ "sense-telemetry",
+ "sense-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sense-input-win"
 version = "0.1.0"
 dependencies = [

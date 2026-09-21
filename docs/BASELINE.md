@@ -52,7 +52,7 @@ Do **not** silently compensate the yaw constant from human 360° residuals.
 
 Changing DPI/sens for an experiment is expected. Changing VSync/present mode, raw-input path, QPC, NoAcceleration, pitch model, `0.07`, or HFOV=103 requires an explicit experiment version bump and documentation.
 
-**Experiment version:** `0.12.0` (TRACKING v1: horizontal strafe hold-to-score; time on target while LMB held; `direction_change` events for reversals/wall bounces; no `aim_shots`; full look telemetry; Lobby + pause + History replay; no schema change; STATIC_CLICK + GRIDSHOT unchanged on five-table aim telemetry with Lab UI shell pause semantics).
+**Experiment version:** `0.12.2` (TRACKING v2: hold rapid-fire at 20 Hz; `task_version` `"2"`; primary `hits`/`shots`/`accuracy`; `score_secs` = on-target hold time secondary. STATIC_CLICK/GRIDSHOT remain LCG full-unit `task_version` `"2"` from `0.12.1`).
 
 ## Research progression (locked order)
 
@@ -77,9 +77,17 @@ Aim History replay (list + 3D reconstruct) ← COMPLETE / STOPPED (exp 0.11.0)
  ↓
 TRACKING v1 (horizontal strafe hold-to-score) ← COMPLETE / STOPPED (exp 0.12.0)
  ↓
-M4  Compare conditions
+LCG full-unit fix (STATIC_CLICK/GRIDSHOT task_version 2) ← COMPLETE / STOPPED (exp 0.12.1)
+ ↓
+TRACKING v2 (hold rapid-fire 20 Hz shots) ← COMPLETE / STOPPED (exp 0.12.2)
+ ↓
+M4.1 sense-analysis freeze (`metric_scope`; analysis_version `"1"`) ← COMPLETE / STOPPED
+ ↓
+M4.2 Condition Comparison (`compare_trials`; comparison_version `"1"`) ← library
+ ↓
+M4.3 Parameter / exposure attribution
  ↓
 Longitudinal experiment
 ```
 
-Do not skip ahead. **Stop** after TRACKING v1 — no 1wall6, vertical tracking, or shot-based tracking scoring until a new task spec; no completeness charts, validation replay, or delete until a new task spec.
+Do not skip ahead. **Stop** after M4.2 for analysis — no recommendations, no Lab UI analysis surface, no multi-trial pooling until a new spec; no 1wall6 or vertical tracking until a new task spec.

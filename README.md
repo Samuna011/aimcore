@@ -28,7 +28,15 @@ See `docs/` for architecture, input model, telemetry schema, experiment design, 
 
 **Aim History replay status:** COMPLETE / STOPPED. History list of completed aim trials; read-only 3D arena replay reconstructs camera, targets, and hit flashes from stored telemetry (no schema change); Esc pauses replay transport. `experiment_version` **`0.11.0`**. See [History replay design spec](docs/superpowers/specs/2026-09-19-aim-history-replay-design.md).
 
-**TRACKING v1 status:** COMPLETE / STOPPED. One horizontally strafing sphere with random reversals and wall bounces; score = time on target while LMB held (hold∧ray sample scoring); 30 s active; `direction_change` target events; no `aim_shots` rows; History replay integrates velocity between events. `experiment_version` **`0.12.0`**. See [TRACKING v1 design spec](docs/superpowers/specs/2026-09-20-tracking-v1-design.md). **Stop** — no 1wall6, vertical tracking, or shot-based tracking scoring until a new task spec.
+**TRACKING v1 status:** COMPLETE / STOPPED. One horizontally strafing sphere with random reversals and wall bounces; score = time on target while LMB held (hold∧ray sample scoring); 30 s active; `direction_change` target events; no `aim_shots` rows; History replay integrates velocity between events. Shipped at `experiment_version` **`0.12.0`**. See [TRACKING v1 design spec](docs/superpowers/specs/2026-09-20-tracking-v1-design.md).
+
+**LCG full-unit fix status:** COMPLETE / STOPPED. STATIC_CLICK / GRIDSHOT LCG draws the full **[0, 1)** unit interval (`task_version` / `rng_version` **`"2"`**). `experiment_version` **`0.12.1`**. See [LCG full-unit fix design](docs/superpowers/specs/2026-09-20-aim-lcg-full-unit-fix-design.md).
+
+**TRACKING v2 status:** COMPLETE / STOPPED. While LMB held, emit **20 Hz** virtual shots (hit if ray∩sphere); primary metrics `hits`/`shots`/`accuracy`; `score_secs` remains on-target hold time (secondary); `task_version` **`"2"`**; `experiment_version` **`0.12.2`**. See [TRACKING v2 design](docs/superpowers/specs/2026-09-21-tracking-v2-rapid-fire-design.md).
+
+**M4.1 sense-analysis status:** FROZEN at `analysis_version` **`"1"`** — reconstruct → Hybrid C → Behavior/Exposure + `metric_scope` (TRACKING: shot accuracy primary; acquisition secondary/partial). See [M4.1 design](docs/superpowers/specs/2026-09-20-m4.1-sense-analysis-design.md) and [freeze addendum](docs/superpowers/specs/2026-09-21-m4.1-freeze-metric-scope-design.md).
+
+**M4.2 Condition Comparison status:** Library `compare_trials` + `compare_trial_ids` / `find_comparison_candidates` (`comparison_version` **`"1"`**). Fairness keys + deltas (mean/median); never declares a winner. See [M4.2 design](docs/superpowers/specs/2026-09-21-m4.2-condition-comparison-design.md).
 
 ## Requirements
 
@@ -98,4 +106,4 @@ sqlite3 data/sense_maxer.db "SELECT processor_id, COUNT(*) FROM processed_mouse_
 
 ## Status
 
-M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + M4.a GRIDSHOT v1 + **Lab UI shell** + **Aim History replay** + **TRACKING v1** complete — **STOPPED** at exp `0.12.0`. Next: new task spec (1wall6) or M4 compare conditions.
+M1 Validation Lab complete (`docs/M1_COMPLETION_REPORT.md`). M2 processor framework complete (`docs/M2_PROCESSOR.md`). M2.x Phase 1.1 (`rawaccel_linear` v1.1.0, Gain + caps) complete (`docs/M2X_RAWACCEL_LINEAR.md`). M3 STATIC_CLICK + M3.x/M3.y aim telemetry + M4.a GRIDSHOT v1 + **Lab UI shell** + **Aim History replay** + **TRACKING v1/v2** + **LCG full-unit fix** complete — app **STOPPED** at exp `0.12.2`. **M4.1** frozen (`analysis_version` `"1"` + `metric_scope`). **M4.2** condition comparison library shipped (`comparison_version` `"1"`). Next: matched NoAccel vs RawAccel data collection, then M4.3 attribution.

@@ -1,0 +1,21 @@
+[package]
+name = "sense-analysis"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+
+[dependencies]
+sense-telemetry = { workspace = true }
+sense-types = { workspace = true }
+sense-accel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[example]]
+name = "dump_analysis"
+path = "examples/dump_analysis.rs"
+
+[[example]]
+name = "dump_comparison"
+path = "examples/dump_comparison.rs"

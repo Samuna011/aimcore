@@ -32,6 +32,16 @@ pub struct AimTrialReplayBundle {
     pub camera_samples: Vec<AimCameraSampleRecord>,
 }
 
+/// Full five-layer bundle for offline analysis (includes input samples).
+#[derive(Debug, Clone)]
+pub struct AimTrialAnalysisBundle {
+    pub trial: AimTrialRecord,
+    pub target_events: Vec<AimTargetEventRecord>,
+    pub shots: Vec<AimShotRecord>,
+    pub camera_samples: Vec<AimCameraSampleRecord>,
+    pub input_samples: Vec<AimInputSampleRecord>,
+}
+
 impl TelemetryDb {
     pub fn open(path: &Path) -> Result<Self, String> {
         Connection::open(path)
@@ -684,6 +694,22 @@ WHERE id = ?1
             camera_samples,
         })
     }
+
+    /// Full five-layer load for offline analysis (includes `aim_input_samples`).
+    pub fn load_aim_trial_analysis_bundle(
+        &self,
+        id: &str,
+    ) -> Result<AimTrialAnalysisBundle, String> {
+        let replay = self.load_aim_trial_bundle(id)?;
+        let input_samples = query_input_samples(&self.connection, id)?;
+        Ok(AimTrialAnalysisBundle {
+            trial: replay.trial,
+            target_events: replay.target_events,
+            shots: replay.shots,
+            camera_samples: replay.camera_samples,
+            input_samples,
+        })
+    }
 }
 
 fn aim_trial_from_row(row: &Row<'_>) -> rusqlite::Result<AimTrialRecord> {
@@ -819,6 +845,41 @@ ORDER BY timestamp_ns
                 pitch_deg: row.get(2)?,
                 yaw_delta_deg: row.get(3)?,
                 pitch_delta_deg: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
+}
+
+fn query_input_samples(
+    connection: &Connection,
+    trial_id: &str,
+) -> Result<Vec<AimInputSampleRecord>, String> {
+    let mut statement = connection
+        .prepare(
+            r#"
+SELECT timestamp_ns, sequence_number, raw_dx, raw_dy, processed_dx, processed_dy,
+       dt_ns, dt_used_ns, input_speed, acceleration_scale
+FROM aim_input_samples
+WHERE trial_id = ?1
+ORDER BY timestamp_ns, sequence_number
+"#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([trial_id], |row| {
+            Ok(AimInputSampleRecord {
+                timestamp_ns: row.get(0)?,
+                sequence_number: row.get(1)?,
+                raw_dx: row.get(2)?,
+                raw_dy: row.get(3)?,
+                processed_dx: row.get(4)?,
+                processed_dy: row.get(5)?,
+                dt_ns: row.get(6)?,
+                dt_used_ns: row.get(7)?,
+                input_speed: row.get(8)?,
+                acceleration_scale: row.get(9)?,
             })
         })
         .map_err(|error| error.to_string())?;
