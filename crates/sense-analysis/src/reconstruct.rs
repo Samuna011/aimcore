@@ -28,10 +28,13 @@ pub struct InputPoint {
     pub processed_dy: f64,
     pub dt_ns: u64,
     pub dt_used_ns: u64,
-    pub raw_speed: f64,
-    pub processed_speed: f64,
+    /// √(raw_dx²+raw_dy²) / (dt_ns → ms). Physical QPC speed; comparable across processors.
+    pub physical_raw_speed: f64,
+    /// √(processed_dx²+processed_dy²) / (dt_ns → ms).
+    pub physical_processed_speed: f64,
     pub acceleration_scale: Option<f64>,
-    pub input_speed: Option<f64>,
+    /// Stored processor-path speed (`input_speed` column). Never invented for `none`.
+    pub processor_input_speed: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,17 +165,20 @@ fn reconstruct_inputs(samples: &[AimInputSampleRecord]) -> Vec<InputPoint> {
     samples
         .iter()
         .map(|s| {
-            let dt_ms = if s.dt_used_ns > 0 {
-                s.dt_used_ns as f64 / 1e6
-            } else if s.dt_ns > 0 {
+            // Physical speeds always use raw QPC dt_ns (not processor dt_used_ns).
+            let dt_ms = if s.dt_ns > 0 {
                 s.dt_ns as f64 / 1e6
             } else {
                 0.0
             };
             let raw_mag = ((s.raw_dx as f64).powi(2) + (s.raw_dy as f64).powi(2)).sqrt();
             let proc_mag = (s.processed_dx.powi(2) + s.processed_dy.powi(2)).sqrt();
-            let raw_speed = if dt_ms > 0.0 { raw_mag / dt_ms } else { 0.0 };
-            let processed_speed = if dt_ms > 0.0 { proc_mag / dt_ms } else { 0.0 };
+            let physical_raw_speed = if dt_ms > 0.0 { raw_mag / dt_ms } else { 0.0 };
+            let physical_processed_speed = if dt_ms > 0.0 {
+                proc_mag / dt_ms
+            } else {
+                0.0
+            };
             InputPoint {
                 timestamp_ns: s.timestamp_ns,
                 sequence_number: s.sequence_number,
@@ -182,10 +188,10 @@ fn reconstruct_inputs(samples: &[AimInputSampleRecord]) -> Vec<InputPoint> {
                 processed_dy: s.processed_dy,
                 dt_ns: s.dt_ns,
                 dt_used_ns: s.dt_used_ns,
-                raw_speed,
-                processed_speed,
+                physical_raw_speed,
+                physical_processed_speed,
                 acceleration_scale: s.acceleration_scale,
-                input_speed: s.input_speed,
+                processor_input_speed: s.input_speed,
             }
         })
         .collect()

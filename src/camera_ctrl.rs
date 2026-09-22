@@ -3,7 +3,12 @@ use sense_accel::{create_processor, InputProcessor, RawAccelLinearConfig};
 use sense_types::{InputCameraSample, MouseSample, ProcessedMouseSample};
 
 use crate::{
+    aim_flick_demand::{
+        apply_flick_demand_shot, finish_flick_demand_trial, flick_demand_should_end,
+    },
+    aim_flick_ladder::{apply_flick_ladder_shot, finish_flick_ladder_trial, flick_ladder_should_end},
     aim_gridshot::{apply_gridshot_shot, finish_gridshot_trial, gridshot_should_end},
+    aim_one_wall_six::{apply_one_wall_six_shot, finish_one_wall_six_trial, one_wall_six_should_end},
     aim_tracking::{
         sync_tracking_lmb_during_pause, sync_tracking_lmb_from_sample, tick_tracking_frame_logic,
         TrackingTickResult,
@@ -139,11 +144,29 @@ pub fn drain_mouse_to_camera(
             accumulate_stats,
         );
         if aim.phase == AimPhase::Armed {
-            // GRIDSHOT: first timestamp with elapsed ≥ 60 ends before any gameplay on that sample.
-            if aim.task_kind == AimTaskKind::Gridshot
-                && gridshot_should_end(&aim, sample.timestamp_ns)
-            {
-                if finish_gridshot_trial(&mut aim, sample.timestamp_ns) {
+            // Timed click tasks: first timestamp with elapsed ≥ duration ends before gameplay.
+            let should_end_timed = match aim.task_kind {
+                AimTaskKind::Gridshot => gridshot_should_end(&aim, sample.timestamp_ns),
+                AimTaskKind::FlickLadder => flick_ladder_should_end(&aim, sample.timestamp_ns),
+                AimTaskKind::FlickDemand => flick_demand_should_end(&aim, sample.timestamp_ns),
+                AimTaskKind::OneWallSix => one_wall_six_should_end(&aim, sample.timestamp_ns),
+                _ => false,
+            };
+            if should_end_timed {
+                let finished = match aim.task_kind {
+                    AimTaskKind::Gridshot => finish_gridshot_trial(&mut aim, sample.timestamp_ns),
+                    AimTaskKind::FlickLadder => {
+                        finish_flick_ladder_trial(&mut aim, sample.timestamp_ns)
+                    }
+                    AimTaskKind::FlickDemand => {
+                        finish_flick_demand_trial(&mut aim, sample.timestamp_ns)
+                    }
+                    AimTaskKind::OneWallSix => {
+                        finish_one_wall_six_trial(&mut aim, sample.timestamp_ns)
+                    }
+                    _ => false,
+                };
+                if finished {
                     let status = match unix_time_ms() {
                         Ok(end_unix_ms) => {
                             persist_completed_aim_trial(&mut aim, end_unix_ms, sample.timestamp_ns)
@@ -190,6 +213,18 @@ pub fn drain_mouse_to_camera(
                     AimTaskKind::Gridshot => {
                         let _ = apply_gridshot_shot(&mut aim, &camera, sample.timestamp_ns);
                         false // timer owns Gridshot end / persist
+                    }
+                    AimTaskKind::FlickLadder => {
+                        let _ = apply_flick_ladder_shot(&mut aim, &camera, sample.timestamp_ns);
+                        false
+                    }
+                    AimTaskKind::FlickDemand => {
+                        let _ = apply_flick_demand_shot(&mut aim, &camera, sample.timestamp_ns);
+                        false
+                    }
+                    AimTaskKind::OneWallSix => {
+                        let _ = apply_one_wall_six_shot(&mut aim, &camera, sample.timestamp_ns);
+                        false
                     }
                     AimTaskKind::Tracking => false,
                 };

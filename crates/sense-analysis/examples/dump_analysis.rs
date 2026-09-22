@@ -79,8 +79,11 @@ fn print_summary(r: &AnalysisResult) {
         }
         if let Some(e) = &s.exposure {
             println!(
-                "shot0 accel_scale_mean={:?} cap_exposure={:.3}",
-                e.acceleration_scale_mean, e.cap_exposure
+                "shot0 accel_scale_mean={:?} processor_input_speed={:?} physical_raw={:.3} cap_exposure={:.3}",
+                e.acceleration_scale_mean,
+                e.processor_input_speed_mean,
+                e.physical_raw_speed_mean,
+                e.cap_exposure
             );
         }
     }

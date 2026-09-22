@@ -28,10 +28,10 @@ fn recon_from_speeds(speeds: &[(u64, f64)]) -> ReconstructedTrial {
             processed_dy: 0.0,
             dt_ns: 0,
             dt_used_ns: 0,
-            raw_speed: 0.0,
-            processed_speed: 0.0,
+            physical_raw_speed: 0.0,
+            physical_processed_speed: 0.0,
             acceleration_scale: None,
-            input_speed: None,
+            processor_input_speed: None,
         }],
         stats: sense_analysis::reconstruct::ReconstructionStats {
             max_abs_step_deg: 0.0,

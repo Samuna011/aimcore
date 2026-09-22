@@ -1,7 +1,7 @@
-# Telemetry Schema (M1 + M2 + M3.x + M3.y + M4.a + Lab UI shell + Aim History replay + TRACKING v1/v2)
+# Telemetry Schema (M1 + M2 + M3.x + M3.y + M4.a + Lab UI shell + Aim History replay + TRACKING v1/v2 + FLICK_LADDER / ONE_WALL_SIX)
 
 **Date:** 2026-09-21  
-**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.12.2`  
+**M2:** adds `processed_mouse_events`; validation sessions use `experiment_version` `0.14.0`  
 **M3.x:** adds `aim_trials` / `aim_shots` for completed aim runs (`experiment_id` = `aim_lab`)  
 **M3.y:** adds `aim_target_events`, `aim_input_samples`, `aim_camera_samples`; expands `aim_trials` snapshot  
 **M4.a:** `trial_type = GRIDSHOT` on the same five tables  
@@ -9,7 +9,9 @@
 **Aim History replay:** read-only reconstruct from existing five-table aim telemetry via `list_aim_trials_summary` / `load_aim_trial_bundle`; no schema bump  
 **TRACKING v1:** `trial_type = TRACKING`; hold∧ray sample scoring (`score_secs` = on-target seconds; `accuracy` = `score_secs / active_duration_secs`); `direction_change` target events; **no** `aim_shots` rows; shipped at **`0.12.0`**  
 **LCG full-unit fix:** STATIC_CLICK / GRIDSHOT `task_version` / `rng_version` **`"2"`** (full [0,1) LCG); TRACKING stayed `"1"` at **`0.12.1`**  
-**TRACKING v2:** hold rapid-fire at 20 Hz → `aim_shots`; `accuracy` = `hits/shots`; `score_secs` remains on-target hold seconds (secondary); `task_version` **`"2"`**; new completed trials write at **`0.12.2`**  
+**TRACKING v2:** hold rapid-fire at 20 Hz → `aim_shots`; `accuracy` = `hits/shots`; `score_secs` remains on-target hold seconds (secondary); `task_version` **`"2"`**; shipped at **`0.12.2`**  
+**FLICK_LADDER / ONE_WALL_SIX:** timed click tasks (`task_version` **`"1"`**); shipped at **`0.13.0`**  
+**FLICK_DEMAND / M4.3:** controlled demand ladder (`task_version` **`"1"`**); new completed aim trials and validation sessions write at **`0.14.0`**; no schema change (new `trial_type` + analysis demand fields only)  
 **Database path:** `data/sense_maxer.db` (gitignored)  
 **Write pattern:** in-memory buffers during `ValidationState::Running`; batched flush on End Validation inside a single transaction; never one transaction per mouse event.
 
@@ -68,7 +70,7 @@ One row per Validation Lab session (Start → End).
 | `configuration_id` | TEXT FK | → `configurations.id` |
 | `app_version` | TEXT | binary version (`0.1.0`) |
 | `experiment_id` | TEXT | `validation_lab` |
-| `experiment_version` | TEXT | `0.12.1` for all new sessions, regardless of processor |
+| `experiment_version` | TEXT | `0.14.0` for all new sessions, regardless of processor |
 | `random_seed` | INTEGER | stored even if unused in M1 |
 | `start_unix_ms` | INTEGER | wall clock (Unix ms) |
 | `end_unix_ms` | INTEGER | wall clock, nullable until End |
@@ -216,8 +218,8 @@ One row per **completed** aim trial. Immutable experiment/run snapshot: everythi
 | `id` | TEXT PK | `aim_{utc_date}_{seq:06}` |
 | `app_version` | TEXT | binary version |
 | `experiment_id` | TEXT | `aim_lab` (distinct from `validation_lab`) |
-| `experiment_version` | TEXT | **`0.12.1`** |
-| `trial_type` | TEXT | `STATIC_CLICK`, `GRIDSHOT`, or `TRACKING` (task discriminator) |
+| `experiment_version` | TEXT | **`0.14.0`** |
+| `trial_type` | TEXT | `STATIC_CLICK`, `GRIDSHOT`, `TRACKING`, `FLICK_LADDER`, `ONE_WALL_SIX`, or `FLICK_DEMAND` (task discriminator) |
 | `status` | TEXT | always `completed` for inserted rows |
 | `processor_id` | TEXT | snapshot at finish |
 | `processor_version` | TEXT | snapshot at finish |
@@ -244,8 +246,8 @@ One row per **completed** aim trial. Immutable experiment/run snapshot: everythi
 | `hits` | INTEGER | successful hits (TRACKING v1: 0; TRACKING v2: rapid-fire hits) |
 | `shots` | INTEGER | all clicks / virtual shots (TRACKING v1: 0; TRACKING v2: rapid-fire shots) |
 | `misses` | INTEGER | `shots - hits` |
-| `score_secs` | REAL | pause-excluded active time to finish (STATIC_CLICK/GRIDSHOT) or on-target seconds (TRACKING) |
-| `accuracy` | REAL | `hits / shots` (STATIC_CLICK/GRIDSHOT/TRACKING v2; 0 if no shots). TRACKING v1 rows: `score_secs / active_duration_secs` |
+| `score_secs` | REAL | pause-excluded active time to finish (STATIC_CLICK/GRIDSHOT/FLICK_LADDER/ONE_WALL_SIX) or on-target seconds (TRACKING) |
+| `accuracy` | REAL | `hits / shots` (click tasks + TRACKING v2; 0 if no shots). TRACKING v1 rows: `score_secs / active_duration_secs` |
 
 #### Seed semantics
 
@@ -375,7 +377,7 @@ Design: [2026-09-19-m3y-aim-telemetry-data-model-design.md](./superpowers/specs/
 
 ## M3.x Aim Tables (superseded by M3.y)
 
-M3.x introduced `aim_trials` + `aim_shots` only. M3.y extends the snapshot columns and adds three child streams. Existing `0.7.0`–`0.12.1` rows remain readable after migration; new completed trials write at **`0.12.2`** (STATIC_CLICK, GRIDSHOT, or TRACKING) with full child streams and pause-excluded duration fields. STATIC_CLICK/GRIDSHOT rows at `task_version` `"1"` used half-range LCG; `"2"` is full-unit. TRACKING v1 (`task_version` `"1"`) omits `aim_shots`; TRACKING v2 writes rapid-fire `aim_shots`.
+M3.x introduced `aim_trials` + `aim_shots` only. M3.y extends the snapshot columns and adds three child streams. Existing `0.7.0`–`0.13.0` rows remain readable after migration; new completed trials write at **`0.14.0`** (STATIC_CLICK, GRIDSHOT, TRACKING, FLICK_LADDER, ONE_WALL_SIX, or FLICK_DEMAND) with full child streams and pause-excluded duration fields. STATIC_CLICK/GRIDSHOT rows at `task_version` `"1"` used half-range LCG; `"2"` is full-unit. TRACKING v1 (`task_version` `"1"`) omits `aim_shots`; TRACKING v2 writes rapid-fire `aim_shots`. FLICK_LADDER / ONE_WALL_SIX / FLICK_DEMAND use `task_version` `"1"`.
 
 ---
 

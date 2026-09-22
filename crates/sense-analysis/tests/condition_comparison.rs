@@ -46,7 +46,7 @@ fn base_trial() -> AimTrialRecord {
 
 fn empty_analysis(trial: &AimTrialRecord) -> AnalysisResult {
     AnalysisResult {
-        analysis_version: "1".into(),
+        analysis_version: "2".into(),
         trial_id: trial.id.clone(),
         trial_type: trial.trial_type.clone(),
         experiment_version: trial.experiment_version.clone(),
@@ -137,10 +137,12 @@ fn shot_with_behavior(index: u32, endpoint: f64) -> ShotAnalysis {
         correction_end_ns: None,
         behavior: Some(behavior_stub(endpoint)),
         exposure: Some(ExposureMetrics {
-            raw_speed_mean: 1.0,
-            raw_speed_peak: 2.0,
-            processed_speed_mean: 1.0,
-            processed_speed_peak: 2.0,
+            physical_raw_speed_mean: 1.0,
+            physical_raw_speed_peak: 2.0,
+            physical_processed_speed_mean: 1.0,
+            physical_processed_speed_peak: 2.0,
+            processor_input_speed_mean: None,
+            processor_input_speed_peak: None,
             acceleration_scale_mean: None,
             acceleration_scale_peak: None,
             gain_ratio_mean: 1.0,
@@ -149,6 +151,8 @@ fn shot_with_behavior(index: u32, endpoint: f64) -> ShotAnalysis {
             cap_applicable: false,
             processor_time_ns: 1,
         }),
+        movement_demand: None,
+        processor_exposure: None,
         quality_flags: vec![],
     }
 }

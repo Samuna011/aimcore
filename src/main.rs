@@ -1,4 +1,7 @@
+mod aim_flick_demand;
+mod aim_flick_ladder;
 mod aim_gridshot;
+mod aim_one_wall_six;
 mod aim_replay;
 mod aim_tracking;
 mod aim_trial;

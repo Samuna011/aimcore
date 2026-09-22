@@ -3,10 +3,15 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ExposureMetrics {
-    pub raw_speed_mean: f64,
-    pub raw_speed_peak: f64,
-    pub processed_speed_mean: f64,
-    pub processed_speed_peak: f64,
+    /// √(raw²) / dt_ns_ms — physical QPC; comparable across processors.
+    pub physical_raw_speed_mean: f64,
+    pub physical_raw_speed_peak: f64,
+    /// √(processed²) / dt_ns_ms.
+    pub physical_processed_speed_mean: f64,
+    pub physical_processed_speed_peak: f64,
+    /// Mean/peak of **stored** `input_speed` only (`None` if no samples had it — e.g. `none`).
+    pub processor_input_speed_mean: Option<f64>,
+    pub processor_input_speed_peak: Option<f64>,
     pub acceleration_scale_mean: Option<f64>,
     pub acceleration_scale_peak: Option<f64>,
     pub gain_ratio_mean: f64,
@@ -33,6 +38,9 @@ pub fn exposure_for_interval(
     let mut raw_peak = 0.0_f64;
     let mut proc_sum = 0.0_f64;
     let mut proc_peak = 0.0_f64;
+    let mut pin_sum = 0.0_f64;
+    let mut pin_n = 0usize;
+    let mut pin_peak = 0.0_f64;
     let mut scale_sum = 0.0_f64;
     let mut scale_n = 0usize;
     let mut scale_peak = 0.0_f64;
@@ -45,17 +53,27 @@ pub fn exposure_for_interval(
     let cap_applicable = cap_scale.is_some();
 
     for s in &samples {
-        raw_sum += s.raw_speed;
-        raw_peak = raw_peak.max(s.raw_speed);
-        proc_sum += s.processed_speed;
-        proc_peak = proc_peak.max(s.processed_speed);
+        raw_sum += s.physical_raw_speed;
+        raw_peak = raw_peak.max(s.physical_raw_speed);
+        proc_sum += s.physical_processed_speed;
+        proc_peak = proc_peak.max(s.physical_processed_speed);
         processor_time = processor_time.saturating_add(s.dt_used_ns);
 
         let raw_mag = ((s.raw_dx as f64).powi(2) + (s.raw_dy as f64).powi(2)).sqrt();
         let proc_mag = (s.processed_dx.powi(2) + s.processed_dy.powi(2)).sqrt();
-        let gain = if raw_mag < 1e-9 { 1.0 } else { proc_mag / raw_mag };
+        let gain = if raw_mag < 1e-9 {
+            1.0
+        } else {
+            proc_mag / raw_mag
+        };
         gain_sum += gain;
         gain_peak = gain_peak.max(gain);
+
+        if let Some(pin) = s.processor_input_speed {
+            pin_sum += pin;
+            pin_n += 1;
+            pin_peak = pin_peak.max(pin);
+        }
 
         if let Some(scale) = s.acceleration_scale {
             scale_sum += scale;
@@ -71,16 +89,26 @@ pub fn exposure_for_interval(
 
     let n = samples.len().max(1) as f64;
     ExposureMetrics {
-        raw_speed_mean: raw_sum / n,
-        raw_speed_peak: raw_peak,
-        processed_speed_mean: proc_sum / n,
-        processed_speed_peak: proc_peak,
+        physical_raw_speed_mean: raw_sum / n,
+        physical_raw_speed_peak: raw_peak,
+        physical_processed_speed_mean: proc_sum / n,
+        physical_processed_speed_peak: proc_peak,
+        processor_input_speed_mean: if pin_n > 0 {
+            Some(pin_sum / pin_n as f64)
+        } else {
+            None
+        },
+        processor_input_speed_peak: if pin_n > 0 { Some(pin_peak) } else { None },
         acceleration_scale_mean: if scale_n > 0 {
             Some(scale_sum / scale_n as f64)
         } else {
             None
         },
-        acceleration_scale_peak: if scale_n > 0 { Some(scale_peak) } else { None },
+        acceleration_scale_peak: if scale_n > 0 {
+            Some(scale_peak)
+        } else {
+            None
+        },
         gain_ratio_mean: gain_sum / n,
         gain_ratio_peak: gain_peak,
         cap_exposure: if samples.is_empty() || !cap_applicable {

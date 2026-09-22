@@ -18,10 +18,10 @@ fn recon_with_scales(scales: &[(u64, f64, i32)]) -> ReconstructedTrial {
                 processed_dy: 0.0,
                 dt_ns: 1_000_000,
                 dt_used_ns: 1_000_000,
-                raw_speed: 1.0,
-                processed_speed: *scale,
+                physical_raw_speed: 1.0,
+                physical_processed_speed: *scale,
                 acceleration_scale: Some(*scale),
-                input_speed: Some(1.0),
+                processor_input_speed: Some(1.0),
             })
             .collect(),
         stats: sense_analysis::reconstruct::ReconstructionStats {

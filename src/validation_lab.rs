@@ -5,7 +5,12 @@ use bevy_egui::{egui, EguiContexts};
 use sense_accel::CapMode;
 
 use crate::{
+    aim_flick_demand::{start_flick_demand_trial, FLICK_DEMAND_DURATION_SECS},
+    aim_flick_ladder::{start_flick_ladder_trial, FLICK_LADDER_DURATION_SECS},
     aim_gridshot::{start_gridshot_trial, GRIDSHOT_CONCURRENT, GRIDSHOT_DURATION_SECS},
+    aim_one_wall_six::{
+        start_one_wall_six_trial, ONE_WALL_SIX_CONCURRENT, ONE_WALL_SIX_DURATION_SECS,
+    },
     aim_replay::{live_targets_at, AimReplay},
     aim_tracking::{start_tracking_trial, TRACKING_DURATION_SECS},
     aim_trial::{
@@ -324,6 +329,21 @@ fn draw_lobby(
         "Static Click",
     );
     ui.radio_value(&mut lab_ui.selected_task, AimTaskKind::Gridshot, "Gridshot");
+    ui.radio_value(
+        &mut lab_ui.selected_task,
+        AimTaskKind::FlickLadder,
+        "Flick Ladder",
+    );
+    ui.radio_value(
+        &mut lab_ui.selected_task,
+        AimTaskKind::FlickDemand,
+        "Flick Demand",
+    );
+    ui.radio_value(
+        &mut lab_ui.selected_task,
+        AimTaskKind::OneWallSix,
+        "One Wall Six",
+    );
     ui.radio_value(&mut lab_ui.selected_task, AimTaskKind::Tracking, "Tracking");
     ui.horizontal(|ui| {
         if ui
@@ -508,6 +528,9 @@ fn draw_pause_home(
     ui.label(match aim.task_kind {
         AimTaskKind::StaticClick => "Static Click is paused.",
         AimTaskKind::Gridshot => "Gridshot is paused.",
+        AimTaskKind::FlickLadder => "Flick Ladder is paused.",
+        AimTaskKind::FlickDemand => "Flick Demand is paused.",
+        AimTaskKind::OneWallSix => "One Wall Six is paused.",
         AimTaskKind::Tracking => "Tracking is paused.",
     });
     if ui.button("Resume").clicked() {
@@ -759,6 +782,27 @@ fn draw_playing_hud(
                     accuracy * 100.0,
                     (GRIDSHOT_DURATION_SECS - elapsed).max(0.0),
                 ),
+                AimTaskKind::FlickLadder => format!(
+                    "FLICK LADDER · {} hits / {} shots · {:.1}% · {:.1}s",
+                    aim.hits,
+                    shots,
+                    accuracy * 100.0,
+                    (FLICK_LADDER_DURATION_SECS - elapsed).max(0.0),
+                ),
+                AimTaskKind::FlickDemand => format!(
+                    "FLICK DEMAND · {} hits / {} shots · {:.1}% · {:.1}s",
+                    aim.hits,
+                    shots,
+                    accuracy * 100.0,
+                    (FLICK_DEMAND_DURATION_SECS - elapsed).max(0.0),
+                ),
+                AimTaskKind::OneWallSix => format!(
+                    "ONE WALL SIX · {} hits / {} shots · {:.1}% · {:.1}s",
+                    aim.hits,
+                    shots,
+                    accuracy * 100.0,
+                    (ONE_WALL_SIX_DURATION_SECS - elapsed).max(0.0),
+                ),
                 AimTaskKind::Tracking => {
                     let score = aim.time_on_target_ns as f64 / 1e9;
                     let shots = aim.shot_log.len() as u32;
@@ -901,6 +945,15 @@ fn start_selected_trial(
         AimTaskKind::Gridshot => {
             start_gridshot_trial(pose, aim, validation, now, start_ms, now, config)
         }
+        AimTaskKind::FlickLadder => {
+            start_flick_ladder_trial(pose, aim, validation, now, start_ms, now, config)
+        }
+        AimTaskKind::FlickDemand => {
+            start_flick_demand_trial(pose, aim, validation, now, start_ms, now, config)
+        }
+        AimTaskKind::OneWallSix => {
+            start_one_wall_six_trial(pose, aim, validation, now, start_ms, now, config)
+        }
         AimTaskKind::Tracking => {
             start_tracking_trial(pose, aim, validation, now, start_ms, now, config)
         }
@@ -913,6 +966,15 @@ fn start_selected_trial(
             }
             AimTaskKind::Gridshot => format!(
                 "Gridshot armed — {GRIDSHOT_DURATION_SECS:.0}s, {GRIDSHOT_CONCURRENT} live targets."
+            ),
+            AimTaskKind::FlickLadder => format!(
+                "Flick Ladder armed — {FLICK_LADDER_DURATION_SECS:.0}s commanded yaw flicks."
+            ),
+            AimTaskKind::FlickDemand => format!(
+                "Flick Demand armed — {FLICK_DEMAND_DURATION_SECS:.0}s matrix yaw set (±10/30/60/90)."
+            ),
+            AimTaskKind::OneWallSix => format!(
+                "One Wall Six armed — {ONE_WALL_SIX_DURATION_SECS:.0}s, {ONE_WALL_SIX_CONCURRENT} live targets."
             ),
             AimTaskKind::Tracking => {
                 format!("Tracking armed — hold LMB; 20 Hz fire · {TRACKING_DURATION_SECS:.0}s.")

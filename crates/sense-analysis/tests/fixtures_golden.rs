@@ -92,14 +92,10 @@ fn golden_json_contains_stable_namespaces() {
 
     let result = analyze_trial(&bundle, &AnalysisConfig::v1()).unwrap();
     let json = analysis_result_to_json(&result);
-    assert!(json.contains("\"analysis_version\": \"1\""));
+    assert!(json.contains("\"analysis_version\": \"2\""));
     assert!(json.contains("\"metric_scope\""));
-    assert!(json.contains("\"shot_accuracy\""));
-    assert_eq!(
-        result.metric_scope.shot_accuracy,
-        sense_analysis::Applicability::Applicable
-    );
-    assert!(json.contains("endpoint_error_deg") || json.contains("ORPHAN_SHOT") || json.contains("orphan"));
+    assert!(json.contains("\"physical_raw_speed_mean\"") || json.contains("endpoint_error_deg") || json.contains("ORPHAN_SHOT") || json.contains("orphan"));
+    assert!(!json.contains("\"raw_speed_mean\""));
     assert!(!json.contains("cause"));
     assert!(!json.contains("recommend"));
 }

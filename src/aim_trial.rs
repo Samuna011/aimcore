@@ -32,7 +32,7 @@ pub const AIM_HITS_TO_FINISH: u32 = 5;
 
 pub const AIM_APP_VERSION: &str = "0.1.0";
 pub const AIM_EXPERIMENT_ID: &str = "aim_lab";
-pub const AIM_EXPERIMENT_VERSION: &str = "0.12.2";
+pub const AIM_EXPERIMENT_VERSION: &str = "0.14.0";
 pub const AIM_TRIAL_TYPE: &str = "STATIC_CLICK";
 /// Bumped to `"2"` with full-unit LCG (`lcg_next_unit` ∈ [0, 1)).
 pub const STATIC_CLICK_TASK_VERSION: &str = "2";
@@ -65,7 +65,7 @@ pub fn format_target_id(ordinal: u32) -> String {
 #[derive(Component)]
 pub struct AimTarget;
 
-/// Index into the AimTarget render pool (0..GRIDSHOT_CONCURRENT).
+/// Index into the AimTarget render pool (0..AIM_TARGET_POOL_SIZE).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AimTargetSlot(pub usize);
 
@@ -85,7 +85,13 @@ pub enum AimTaskKind {
     StaticClick,
     Gridshot,
     Tracking,
+    FlickLadder,
+    FlickDemand,
+    OneWallSix,
 }
+
+/// Max concurrent rendered aim spheres (ONE_WALL_SIX needs 6; GRIDSHOT uses 3).
+pub const AIM_TARGET_POOL_SIZE: usize = 6;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveAimTarget {
@@ -572,6 +578,21 @@ pub fn build_completed_aim_trial_record(
             crate::aim_tracking::TRACKING_TASK_VERSION.to_string(),
             crate::aim_tracking::tracking_task_config_json(),
         ),
+        AimTaskKind::FlickLadder => (
+            crate::aim_flick_ladder::FLICK_LADDER_TRIAL_TYPE.to_string(),
+            crate::aim_flick_ladder::FLICK_LADDER_TASK_VERSION.to_string(),
+            crate::aim_flick_ladder::flick_ladder_task_config_json(),
+        ),
+        AimTaskKind::FlickDemand => (
+            crate::aim_flick_demand::FLICK_DEMAND_TRIAL_TYPE.to_string(),
+            crate::aim_flick_demand::FLICK_DEMAND_TASK_VERSION.to_string(),
+            crate::aim_flick_demand::flick_demand_task_config_json(),
+        ),
+        AimTaskKind::OneWallSix => (
+            crate::aim_one_wall_six::ONE_WALL_SIX_TRIAL_TYPE.to_string(),
+            crate::aim_one_wall_six::ONE_WALL_SIX_TASK_VERSION.to_string(),
+            crate::aim_one_wall_six::one_wall_six_task_config_json(),
+        ),
     };
 
     AimTrialRecord {
@@ -722,7 +743,7 @@ pub fn spawn_aim_target(
         unlit: true,
         ..default()
     });
-    for slot in 0..crate::aim_gridshot::GRIDSHOT_CONCURRENT {
+    for slot in 0..AIM_TARGET_POOL_SIZE {
         commands.spawn((
             AimTarget,
             AimTargetSlot(slot),
@@ -795,15 +816,23 @@ pub fn sync_aim_target(
     mut targets: Query<(&AimTargetSlot, &mut Visibility, &mut Transform), With<AimTarget>>,
 ) {
     if ui.screen == LabScreen::HistoryReplay {
-        let live_targets = replay
-            .bundle
-            .as_ref()
-            .map(|bundle| live_targets_at(&bundle.target_events, replay.t_ns))
-            .unwrap_or_default();
+        let (live_targets, scale) = match replay.bundle.as_ref() {
+            Some(bundle) => {
+                let live = live_targets_at(&bundle.target_events, replay.t_ns);
+                let scale = if bundle.trial.trial_type == "ONE_WALL_SIX" {
+                    crate::aim_one_wall_six::ONE_WALL_SIX_RADIUS / AIM_TARGET_RADIUS
+                } else {
+                    1.0
+                };
+                (live, scale)
+            }
+            None => (Vec::new(), 1.0),
+        };
         for (slot, mut visibility, mut transform) in &mut targets {
             if let Some((_, x, y, z)) = live_targets.get(slot.0) {
                 *visibility = Visibility::Visible;
                 transform.translation = Vec3::new(*x as f32, *y as f32, *z as f32);
+                transform.scale = Vec3::splat(scale);
             } else {
                 *visibility = Visibility::Hidden;
             }
@@ -822,6 +851,7 @@ pub fn sync_aim_target(
                 if slot.0 == 0 {
                     *visibility = Visibility::Visible;
                     transform.translation = trial.current_center;
+                    transform.scale = Vec3::ONE;
                 } else {
                     *visibility = Visibility::Hidden;
                 }
@@ -830,6 +860,7 @@ pub fn sync_aim_target(
                 if let Some(live) = trial.live_targets.get(slot.0) {
                     *visibility = Visibility::Visible;
                     transform.translation = live.center;
+                    transform.scale = Vec3::ONE;
                 } else {
                     *visibility = Visibility::Hidden;
                 }
@@ -838,6 +869,35 @@ pub fn sync_aim_target(
                 if slot.0 == 0 {
                     *visibility = Visibility::Visible;
                     transform.translation = trial.current_center;
+                    transform.scale = Vec3::ONE;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+            AimTaskKind::FlickLadder => {
+                if slot.0 == 0 {
+                    *visibility = Visibility::Visible;
+                    transform.translation = trial.current_center;
+                    transform.scale = Vec3::ONE;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+            AimTaskKind::FlickDemand => {
+                if slot.0 == 0 {
+                    *visibility = Visibility::Visible;
+                    transform.translation = trial.current_center;
+                    transform.scale = Vec3::ONE;
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+            AimTaskKind::OneWallSix => {
+                if let Some(live) = trial.live_targets.get(slot.0) {
+                    *visibility = Visibility::Visible;
+                    transform.translation = live.center;
+                    let s = crate::aim_one_wall_six::ONE_WALL_SIX_RADIUS / AIM_TARGET_RADIUS;
+                    transform.scale = Vec3::splat(s);
                 } else {
                     *visibility = Visibility::Hidden;
                 }
@@ -1116,7 +1176,7 @@ mod tests {
         let record = build_completed_aim_trial_record(&trial, 1_700_000_000_600, end_ns);
 
         assert_eq!(record.trial_type, "STATIC_CLICK");
-        assert_eq!(record.experiment_version, "0.12.2");
+        assert_eq!(record.experiment_version, "0.14.0");
         assert_eq!(record.experiment_id, "aim_lab");
         assert_eq!(record.status, "completed");
         assert!(record.id.is_empty());

@@ -2,6 +2,7 @@
 
 pub mod behavior;
 pub mod compare;
+pub mod demand;
 pub mod exposure;
 pub mod geometry;
 pub mod loader;
@@ -13,9 +14,12 @@ pub mod segment;
 
 pub use behavior::BehaviorMetrics;
 pub use compare::{
-    compare_trials, ComparedMetric, ComparisonValidity, ConditionComparison, ConditionMismatch,
-    ConditionSnapshot, MatchStatus, ProcessorDiff, QualitySummary, COMPARISON_VERSION,
+    compare_trials, compare_trials_with_demand, ComparedMetric, ComparisonValidity,
+    ConditionComparison, ConditionMismatch, ConditionSnapshot, DemandCompareConfig,
+    DemandStratum, DemandStratumComparison, MatchStatus, ProcessorDiff, QualitySummary,
+    COMPARISON_VERSION,
 };
+pub use demand::{MovementDemand, ProcessorExposure};
 pub use exposure::ExposureMetrics;
 pub use loader::{
     compare_trial_ids, find_comparison_candidates, load_and_analyze, CandidateCriteria,
@@ -30,7 +34,7 @@ pub use segment::{MovementCandidate, ShotLink};
 use sense_telemetry::AimTrialAnalysisBundle;
 use serde::Serialize;
 
-pub const ANALYSIS_VERSION: &str = "1";
+pub const ANALYSIS_VERSION: &str = "2";
 
 /// Aim-lab camera origin matching `sense-maxer` STATIC_CLICK / GRIDSHOT.
 pub const ANALYSIS_CAMERA_ORIGIN: [f64; 3] = [0.0, 1.6, 4.0];
@@ -106,6 +110,10 @@ pub struct ShotAnalysis {
     pub correction_end_ns: Option<u64>,
     pub behavior: Option<BehaviorMetrics>,
     pub exposure: Option<ExposureMetrics>,
+    /// Config-independent movement demand (M4.3).
+    pub movement_demand: Option<MovementDemand>,
+    /// Processor exposure on the acquisition window (not a demand dimension).
+    pub processor_exposure: Option<ProcessorExposure>,
     pub quality_flags: Vec<QualityFlag>,
 }
 
@@ -133,7 +141,13 @@ pub fn analyze_trial(
     config: &AnalysisConfig,
 ) -> Result<AnalysisResult, AnalysisError> {
     let trial_type = bundle.trial.trial_type.as_str();
-    if trial_type != "STATIC_CLICK" && trial_type != "GRIDSHOT" && trial_type != "TRACKING" {
+    if trial_type != "STATIC_CLICK"
+        && trial_type != "GRIDSHOT"
+        && trial_type != "TRACKING"
+        && trial_type != "FLICK_LADDER"
+        && trial_type != "ONE_WALL_SIX"
+        && trial_type != "FLICK_DEMAND"
+    {
         return Err(AnalysisError::UnsupportedTrialType(
             bundle.trial.trial_type.clone(),
         ));
@@ -177,45 +191,60 @@ pub fn analyze_trial(
             }
         }
 
-        let (behavior, exposure) = if let Some(mid) = link.primary_movement_id {
-            let cand = candidates.iter().find(|c| c.id == mid).expect("candidate");
-            let behavior = behavior::behavior_for_shot(
-                &recon,
-                cand,
-                shot,
-                link.correction_start_ns,
-                link.correction_end_ns,
-                config,
-            );
-            let exposure = Some(exposure::exposure_for_interval(
-                &recon,
-                cand.start_ns,
-                cand.end_ns.min(shot.timestamp_ns),
-                &bundle.trial.processor_id,
-                &bundle.trial.processor_config_json,
-            ));
-            if let Some(ref exp) = exposure {
-                if quality::scale_mismatch(
+        let (behavior, exposure, movement_demand, processor_exposure) =
+            if let Some(mid) = link.primary_movement_id {
+                let cand = candidates.iter().find(|c| c.id == mid).expect("candidate");
+                let acq_start =
+                    behavior::local_acquisition_start_ns(&recon, cand, shot.timestamp_ns, config);
+                let behavior = behavior::behavior_for_shot(
+                    &recon,
+                    cand,
+                    shot,
+                    link.correction_start_ns,
+                    link.correction_end_ns,
+                    config,
+                );
+                let exposure = Some(exposure::exposure_for_interval(
                     &recon,
                     cand.start_ns,
                     cand.end_ns.min(shot.timestamp_ns),
                     &bundle.trial.processor_id,
                     &bundle.trial.processor_config_json,
-                    config.scale_mismatch_eps,
-                ) {
-                    flags.push(QualityFlag::CameraInputMismatch);
+                ));
+                if let Some(ref exp) = exposure {
+                    if quality::scale_mismatch(
+                        &recon,
+                        cand.start_ns,
+                        cand.end_ns.min(shot.timestamp_ns),
+                        &bundle.trial.processor_id,
+                        &bundle.trial.processor_config_json,
+                        config.scale_mismatch_eps,
+                    ) {
+                        flags.push(QualityFlag::CameraInputMismatch);
+                    }
+                    let _ = exp;
                 }
-                let _ = exp;
-            }
-            if let Some(ref b) = behavior {
-                if b.movement_duration_ns == 0 {
-                    flags.push(QualityFlag::ZeroAcquisitionDuration);
+                if let Some(ref b) = behavior {
+                    if b.movement_duration_ns == 0 {
+                        flags.push(QualityFlag::ZeroAcquisitionDuration);
+                    }
                 }
-            }
-            (behavior, exposure)
-        } else {
-            (None, None)
-        };
+                let (movement_demand, processor_exposure) = demand::demand_for_shot(
+                    &recon,
+                    &bundle.target_events,
+                    cand,
+                    shot,
+                    acq_start,
+                );
+                (
+                    behavior,
+                    exposure,
+                    Some(movement_demand),
+                    Some(processor_exposure),
+                )
+            } else {
+                (None, None, None, None)
+            };
 
         flags.sort();
         flags.dedup();
@@ -228,6 +257,8 @@ pub fn analyze_trial(
             correction_end_ns: link.correction_end_ns,
             behavior,
             exposure,
+            movement_demand,
+            processor_exposure,
             quality_flags: flags,
         });
     }
@@ -348,14 +379,14 @@ mod tests {
             target_id: "t".into(),
         });
         let r = analyze_trial(&b, &AnalysisConfig::v1()).unwrap();
-        assert_eq!(r.analysis_version, "1");
+        assert_eq!(r.analysis_version, "2");
         assert_eq!(r.shots.len(), 1);
     }
 
     #[test]
     fn static_click_empty_shots_ok() {
         let r = analyze_trial(&empty_trial("STATIC_CLICK"), &AnalysisConfig::v1()).unwrap();
-        assert_eq!(r.analysis_version, "1");
+        assert_eq!(r.analysis_version, "2");
         assert!(r.shots.is_empty());
     }
 }

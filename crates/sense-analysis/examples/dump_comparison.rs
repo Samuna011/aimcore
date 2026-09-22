@@ -62,7 +62,12 @@ fn print_summary(c: &ConditionComparison) {
             );
         }
     }
-    for name in ["acceleration_scale_mean", "cap_exposure"] {
+    for name in [
+        "physical_raw_speed_mean",
+        "processor_input_speed_mean",
+        "acceleration_scale_mean",
+        "cap_exposure",
+    ] {
         if let Some(m) = c.exposure_deltas.iter().find(|m| m.name == name) {
             println!(
                 "{name}: a_mean={:?} b_mean={:?} delta_mean={:?}",

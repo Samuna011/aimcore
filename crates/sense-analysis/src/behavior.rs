@@ -155,7 +155,7 @@ pub fn behavior_for_shot(
 /// sample with speed ≥ onset is the click sample itself, acquisition starts at the
 /// **previous** sample (segment start). That prevents `movement_duration_ns == 0` for
 /// flicks that end on the click.
-fn local_acquisition_start_ns(
+pub(crate) fn local_acquisition_start_ns(
     recon: &ReconstructedTrial,
     cand: &MovementCandidate,
     shot_ns: u64,

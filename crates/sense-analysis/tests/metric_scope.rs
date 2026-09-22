@@ -24,3 +24,11 @@ fn gridshot_matches_static_click_scope() {
     let b = metric_scope_for_trial_type("STATIC_CLICK");
     assert_eq!(a, b);
 }
+
+#[test]
+fn flick_and_one_wall_match_gridshot_scope() {
+    let g = metric_scope_for_trial_type("GRIDSHOT");
+    assert_eq!(metric_scope_for_trial_type("FLICK_LADDER"), g);
+    assert_eq!(metric_scope_for_trial_type("ONE_WALL_SIX"), g);
+    assert_eq!(metric_scope_for_trial_type("FLICK_DEMAND"), g);
+}

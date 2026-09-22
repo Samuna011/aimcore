@@ -5,7 +5,38 @@ use crate::{AnalysisResult, QualityFlag};
 use sense_types::AimTrialRecord;
 use serde::Serialize;
 
-pub const COMPARISON_VERSION: &str = "1";
+pub const COMPARISON_VERSION: &str = "2";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DemandStratum {
+    /// Features + distribution notes only; no stratified metric tables.
+    None,
+    /// Bucket by absolute commanded yaw degrees (nearest integer).
+    CommandedAbsYaw,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DemandCompareConfig {
+    pub stratum: DemandStratum,
+}
+
+impl Default for DemandCompareConfig {
+    fn default() -> Self {
+        Self {
+            stratum: DemandStratum::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DemandStratumComparison {
+    /// Stratum key, e.g. `"commanded_abs_yaw:60"`.
+    pub key: String,
+    pub n_a: usize,
+    pub n_b: usize,
+    pub metric_deltas: Vec<ComparedMetric>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +138,10 @@ pub struct ConditionComparison {
     pub metric_deltas: Vec<ComparedMetric>,
     pub exposure_deltas: Vec<ComparedMetric>,
     pub quality_summary: QualitySummary,
+    /// Notes when continuous demand mix differs (histogram mismatch, empty strata, etc.).
+    pub demand_distribution_notes: Vec<String>,
+    /// Populated when [`DemandCompareConfig::stratum`] requests strata; else empty.
+    pub demand_strata: Vec<DemandStratumComparison>,
 }
 
 const INTENTIONAL_KEYS: &[&str] = &["sensitivity", "dpi"];
@@ -433,13 +468,54 @@ fn collect_exposure_deltas(
         let b: Vec<f64> = exp_b.iter().map(|e| sel(e)).collect();
         compared(name, &a, &b, "exposure")
     };
-    out.push(pick(|e| e.raw_speed_mean, "raw_speed_mean"));
-    out.push(pick(|e| e.raw_speed_peak, "raw_speed_peak"));
-    out.push(pick(|e| e.processed_speed_mean, "processed_speed_mean"));
-    out.push(pick(|e| e.processed_speed_peak, "processed_speed_peak"));
+    out.push(pick(
+        |e| e.physical_raw_speed_mean,
+        "physical_raw_speed_mean",
+    ));
+    out.push(pick(
+        |e| e.physical_raw_speed_peak,
+        "physical_raw_speed_peak",
+    ));
+    out.push(pick(
+        |e| e.physical_processed_speed_mean,
+        "physical_processed_speed_mean",
+    ));
+    out.push(pick(
+        |e| e.physical_processed_speed_peak,
+        "physical_processed_speed_peak",
+    ));
     out.push(pick(|e| e.gain_ratio_mean, "gain_ratio_mean"));
     out.push(pick(|e| e.gain_ratio_peak, "gain_ratio_peak"));
     out.push(pick(|e| e.cap_exposure, "cap_exposure"));
+
+    let pin_a: Vec<f64> = exp_a
+        .iter()
+        .filter_map(|e| e.processor_input_speed_mean)
+        .collect();
+    let pin_b: Vec<f64> = exp_b
+        .iter()
+        .filter_map(|e| e.processor_input_speed_mean)
+        .collect();
+    out.push(compared(
+        "processor_input_speed_mean",
+        &pin_a,
+        &pin_b,
+        "exposure",
+    ));
+    let pin_peak_a: Vec<f64> = exp_a
+        .iter()
+        .filter_map(|e| e.processor_input_speed_peak)
+        .collect();
+    let pin_peak_b: Vec<f64> = exp_b
+        .iter()
+        .filter_map(|e| e.processor_input_speed_peak)
+        .collect();
+    out.push(compared(
+        "processor_input_speed_peak",
+        &pin_peak_a,
+        &pin_peak_b,
+        "exposure",
+    ));
 
     let scale_a: Vec<f64> = exp_a
         .iter()
@@ -474,11 +550,30 @@ fn collect_exposure_deltas(
 
 /// Compare two analyzed trials. Always emits deltas when analyses are present;
 /// `match_status` / `comparison_validity` annotate fairness only.
+///
+/// Default demand config: distribution notes only (no stratified tables).
 pub fn compare_trials(
     trial_a: &AimTrialRecord,
     analysis_a: &AnalysisResult,
     trial_b: &AimTrialRecord,
     analysis_b: &AnalysisResult,
+) -> ConditionComparison {
+    compare_trials_with_demand(
+        trial_a,
+        analysis_a,
+        trial_b,
+        analysis_b,
+        &DemandCompareConfig::default(),
+    )
+}
+
+/// Compare with optional demand stratification (M4.3).
+pub fn compare_trials_with_demand(
+    trial_a: &AimTrialRecord,
+    analysis_a: &AnalysisResult,
+    trial_b: &AimTrialRecord,
+    analysis_b: &AnalysisResult,
+    demand_cfg: &DemandCompareConfig,
 ) -> ConditionComparison {
     let mismatches = fairness_mismatches(trial_a, trial_b);
     let match_status = if mismatches.is_empty() {
@@ -487,6 +582,11 @@ pub fn compare_trials(
         MatchStatus::Mismatched
     };
     let comparison_validity = validity_from_mismatches(&mismatches);
+    let demand_distribution_notes = demand_distribution_notes(analysis_a, analysis_b);
+    let demand_strata = match demand_cfg.stratum {
+        DemandStratum::None => Vec::new(),
+        DemandStratum::CommandedAbsYaw => commanded_abs_yaw_strata(analysis_a, analysis_b),
+    };
 
     ConditionComparison {
         comparison_version: COMPARISON_VERSION.into(),
@@ -508,5 +608,110 @@ pub fn compare_trials(
         metric_deltas: collect_metric_deltas(trial_a, analysis_a, trial_b, analysis_b),
         exposure_deltas: collect_exposure_deltas(analysis_a, analysis_b),
         quality_summary: empty_quality(analysis_a, analysis_b),
+        demand_distribution_notes,
+        demand_strata,
     }
+}
+
+fn commanded_abs_yaw_key(yaw: f64) -> i64 {
+    yaw.abs().round() as i64
+}
+
+fn hist_commanded_abs_yaw(analysis: &AnalysisResult) -> std::collections::BTreeMap<i64, usize> {
+    let mut m = std::collections::BTreeMap::new();
+    for s in &analysis.shots {
+        if let Some(ref d) = s.movement_demand {
+            if let Some(y) = d.commanded_yaw_deg {
+                *m.entry(commanded_abs_yaw_key(y)).or_insert(0) += 1;
+            }
+        }
+    }
+    m
+}
+
+fn demand_distribution_notes(a: &AnalysisResult, b: &AnalysisResult) -> Vec<String> {
+    let mut notes = Vec::new();
+    let ha = hist_commanded_abs_yaw(a);
+    let hb = hist_commanded_abs_yaw(b);
+    if ha != hb {
+        notes.push(format!(
+            "commanded_abs_yaw histogram mismatch: a={ha:?} b={hb:?}"
+        ));
+    }
+    let n_cmd_a = a
+        .shots
+        .iter()
+        .filter(|s| {
+            s.movement_demand
+                .as_ref()
+                .and_then(|d| d.commanded_yaw_deg)
+                .is_some()
+        })
+        .count();
+    let n_cmd_b = b
+        .shots
+        .iter()
+        .filter(|s| {
+            s.movement_demand
+                .as_ref()
+                .and_then(|d| d.commanded_yaw_deg)
+                .is_some()
+        })
+        .count();
+    if n_cmd_a == 0 && n_cmd_b == 0 {
+        notes.push("no commanded_yaw_deg on either trial's shots".into());
+    } else if n_cmd_a == 0 || n_cmd_b == 0 {
+        notes.push(format!(
+            "commanded_yaw coverage imbalance: n_a={n_cmd_a} n_b={n_cmd_b}"
+        ));
+    }
+    notes
+}
+
+fn commanded_abs_yaw_strata(
+    analysis_a: &AnalysisResult,
+    analysis_b: &AnalysisResult,
+) -> Vec<DemandStratumComparison> {
+    let mut keys = std::collections::BTreeSet::new();
+    for s in analysis_a.shots.iter().chain(analysis_b.shots.iter()) {
+        if let Some(ref d) = s.movement_demand {
+            if let Some(y) = d.commanded_yaw_deg {
+                keys.insert(commanded_abs_yaw_key(y));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for key in keys {
+        let pick = |analysis: &AnalysisResult| -> Vec<f64> {
+            analysis
+                .shots
+                .iter()
+                .filter_map(|s| {
+                    let d = s.movement_demand.as_ref()?;
+                    let y = d.commanded_yaw_deg?;
+                    if commanded_abs_yaw_key(y) != key {
+                        return None;
+                    }
+                    s.behavior.as_ref().map(|b| b.endpoint_error_deg)
+                })
+                .collect()
+        };
+        let va = pick(analysis_a);
+        let vb = pick(analysis_b);
+        if va.is_empty() && vb.is_empty() {
+            continue;
+        }
+        out.push(DemandStratumComparison {
+            key: format!("commanded_abs_yaw:{key}"),
+            n_a: va.len(),
+            n_b: vb.len(),
+            metric_deltas: vec![compared(
+                "endpoint_error_deg",
+                &va,
+                &vb,
+                "acquisition_metrics",
+            )],
+        });
+    }
+    out
 }
